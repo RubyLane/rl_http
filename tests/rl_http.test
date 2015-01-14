@@ -1,0 +1,30 @@
+package require Tcl 8.6
+
+if {"::tcltest" ni [namespace children]} {
+	package require tcltest
+	namespace import ::tcltest::*
+}
+
+tcl::tm::path add [file dirname [file dirname [file normalize [info script]]]]
+package require rl_http
+package require md5
+
+test rl_http-1.1 {Basic usage, GET, http://} -body { #<<<
+	rl_http create h GET http://image0-rubylane.s3.amazonaws.com/0/cart/introbg.gif -timeout 5
+	list [h code] [md5::md5 -hex [h body]]
+} -cleanup {
+	if {[info object isa object h]} {h destroy}
+} -result {200 E9EE03953F2D261E6329D921D7DDA0A3}
+#>>>
+test rl_http-1.2 {Basic usage, GET, https://} -body { #<<<
+	rl_http create h GET https://image0-rubylane.s3.amazonaws.com/0/cart/introbg.gif -timeout 5
+	list [h code] [md5::md5 -hex [h body]]
+} -cleanup {
+	if {[info object isa object h]} {h destroy}
+} -result {200 E9EE03953F2D261E6329D921D7DDA0A3}
+#>>>
+
+::tcltest::cleanupTests
+return
+
+# vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4
