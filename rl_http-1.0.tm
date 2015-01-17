@@ -17,6 +17,10 @@ oo::class create rl_http {
 	constructor {a_method url args} { #<<<
 		set method	$a_method
 
+		if {[llength [info commands ns_log]] == 0} {
+			proc ns_log {lvl msg} {puts $msg}
+		}
+
 		if {[self next] ne ""} next
 
 		set settings [dict merge {
