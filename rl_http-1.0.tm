@@ -163,6 +163,11 @@ oo::class create rl_http {
 		}
 
 		if {![dict exists $response statusline]} {
+			if {$line eq ""} {
+				# This is expressly forbidden in the HTTP RFC, but for some
+				# reason I'm getting these from the sugarcrm rest api
+				return
+			}
 			dict set response statusline $line
 			return
 		}
