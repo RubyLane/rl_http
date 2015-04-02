@@ -41,7 +41,7 @@ oo::class create rl_http {
 		}
 
 		set method	[string toupper $method]
-		if {$method ni {GET PUT POST DELETE}} {
+		if {$method ni {GET PUT POST DELETE HEAD}} {
 			error "HTTP method \"$method\" not supported"
 		}
 
@@ -218,7 +218,7 @@ oo::class create rl_http {
 
 	#>>>
 	method _read_body {} { #<<<
-		if {[dict get $response code] == 204} {
+		if {[dict get $response code] == 204 || $method eq "HEAD"} {
 			# 204 means No Content - there is nothing to read in this case
 			dict set response body ""
 			return
@@ -313,7 +313,7 @@ oo::class create rl_http {
 		# Convert from the specified charset encoding (if supplied)
 		if {[dict exists $response headers content-type]} {
 			set content_type	[lindex [dict get $response headers content-type] end]
-			if {[regexp {^text/[^ ]+\scharset=\"?([^\"]+)\"?$} $content_type - charset]} {
+			if {[regexp -nocase {^(text|application)/[^ ]+\scharset=\"?([^\"]+)\"?$} $content_type - charset]} {
 				switch -nocase -- $charset {
 					utf-8        { set resp_body_buf [encoding convertfrom utf-8     $resp_body_buf] }
 					iso-8859-1   { set resp_body_buf [encoding convertfrom iso8859-1 $resp_body_buf] }
