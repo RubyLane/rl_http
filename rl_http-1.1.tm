@@ -321,6 +321,21 @@ oo::class create rl_http {
 						text/json {
 							set charset		utf-8
 						}
+
+						application/xml -
+						text/xml {
+							# According to the RFC, text/xml should default to
+							# US-ASCII, but this is widely regarded as stupid,
+							# and US-ASCII is a subset of UTF-8 anyway.  Any
+							# documents that fail because of an invalid UTF-8
+							# encoding were broken anyway (they contained bytes
+							# not legal for US-ASCII either)
+							set charset		utf-8
+						}
+
+						default {
+							set charset		identity
+						}
 					}
 				}
 
@@ -328,6 +343,7 @@ oo::class create rl_http {
 					utf-8        { set resp_body_buf [encoding convertfrom utf-8     $resp_body_buf] }
 					iso-8859-1   { set resp_body_buf [encoding convertfrom iso8859-1 $resp_body_buf] }
 					windows-1252 { set resp_body_buf [encoding convertfrom cp1252    $resp_body_buf] }
+					identity     {}
 					default {
 						# Only broken servers will land here - we specified the set of encodings we support in the
 						# request Accept-Encoding header
