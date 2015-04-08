@@ -313,7 +313,17 @@ oo::class create rl_http {
 		# Convert from the specified charset encoding (if supplied)
 		if {[dict exists $response headers content-type]} {
 			set content_type	[lindex [dict get $response headers content-type] end]
-			if {[regexp -nocase {^(text|application)/[^ ]+\scharset=\"?([^\"]+)\"?$} $content_type - charset]} {
+			if {[regexp -nocase {^((?:text|application)/[^ ]+)(?:\scharset=\"?([^\"]+)\"?)?$} $content_type - mimetype charset]} {
+				if {$charset eq ""} {
+					# Some mimetypes have default charsets
+					switch -- $mimetype {
+						application/json -
+						text/json {
+							set charset		utf-8
+						}
+					}
+				}
+
 				switch -nocase -- $charset {
 					utf-8        { set resp_body_buf [encoding convertfrom utf-8     $resp_body_buf] }
 					iso-8859-1   { set resp_body_buf [encoding convertfrom iso8859-1 $resp_body_buf] }
