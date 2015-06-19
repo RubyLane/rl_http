@@ -42,7 +42,7 @@ package require gc_class
 		}
 
 		set method	[string toupper $method]
-		if {$method ni {GET PUT POST DELETE HEAD}} {
+		if {$method ni {GET PUT POST DELETE HEAD PATCH}} {
 			error "HTTP method \"$method\" not supported"
 		}
 
@@ -373,6 +373,24 @@ package require gc_class
 
 	foreach accessor {code body headers} {
 		method $accessor {} "dict get \$response [list $accessor]"
+	}
+
+	# Utility HTTP-related class methods
+	if {[info commands ns_urlencode] eq ""} {
+		package require http
+		self method encode_query_params args { #<<<
+			http::formatQuery {*}$args
+		}
+
+		#>>>
+	} else {
+		self method encode_query_params args { #<<<
+			join [lmap {k v} $args {
+				format %s=%s [ns_urlencode $k] [ns_urlencode $v]
+			}] &
+		}
+
+		#>>>
 	}
 }
 
