@@ -13,6 +13,7 @@ package require gc_class
 		sock
 		resp_headers_buf
 		resp_body_buf
+		starttime
 	}
 
 	constructor {a_method url args} { #<<<
@@ -65,12 +66,14 @@ package require gc_class
 			set u(path)	/$u(path)
 		}
 
+		set starttime	[clock microseconds]
 		my _connect
 		my _send_request
 		my _read_headers
 		my _parse_statusline
 		my _parse_headers $resp_headers_buf
 		my _read_body
+		my _stats [expr {([clock microseconds] - $starttime) / 1e3}]
 
 		my _cancel_timeout
 	}
@@ -200,7 +203,7 @@ package require gc_class
 		regsub -all {\n\s+} $header_txt { } header_txt
 
 		foreach line [split [string trim $header_txt] \n] {
-			if {![regexp {^([^:]+):\s+(.*)$} $line - k v]} {
+			if {![regexp {^([^:]+):\s*(.*)$} $line - k v]} {
 				throw [list RL HTTP PARSE_HEADERS $line] "Unable to parse HTTP response header line: \"$line\""
 			}
 			my _append_headers [string tolower $k] [lmap e [split $v ,] {string trim $e}]
@@ -370,6 +373,11 @@ package require gc_class
 	}
 
 	#>>>
+	method _stats ms { #<<<
+		# intended to be replaced if stats need to be logged
+	}
+
+	#>>>
 
 	foreach accessor {code body headers} {
 		method $accessor {} "dict get \$response [list $accessor]"
@@ -386,7 +394,7 @@ package require gc_class
 	} else {
 		self method encode_query_params args { #<<<
 			join [lmap {k v} $args {
-				format %s=%s [ns_urlencode $k] [ns_urlencode $v]
+				format %s=%s [ns_urlencode -charset utf-8 -- $k] [ns_urlencode -charset utf-8 -- $v]
 			}] &
 		}
 
