@@ -25,7 +25,7 @@ rl_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 |--------|---------|-------------|
 | -timeout | 15.0 | Time in seconds after which to consider the request a timeout.  The timeout applies from the start of the connection attempt until the response is fully received.  Use a value of "" to disable |
 | -ver | 1.1 | The HTTP version to declare in the request |
-| -accept | */* | The Accept header to send with the request |
+| -accept | \*/\* | The Accept header to send with the request |
 | -headers | | The request headers to send, as a list similar to a dictionary but allowing duplicate keys: HTTP headers can be multivalued |
 | -sizelimit | |  If set, and the returned Content-Length is larger than this value, and exception will be raised: {RL HTTP READ_BODY TOO_BIG $content_length} |
 | -data | | The body of the request.  Must already be encoded to bytes |
