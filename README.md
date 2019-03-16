@@ -64,11 +64,11 @@ switch -glob -- [$h code] {
 When $h is unset (usually because it went out of scope), or its value is
 changed, the instance of rl_http will be destroyed.
 
-## Headers
+### Headers
 
 Response headers (returned by the *headers* method) are represented as a dictionary with the header names as the keys, normalized to lowercase.  The values are a list (HTTP headers can be multi-valued)
 
-## Upload body data and encoding
+### Upload body data and encoding
 
 Request body data supplied in the *-data* option must be fully encoded, matching the Content-Type request header.  For text types this usually means utf-8, for images it should be the raw bytes of the image.
 ~~~tcl
@@ -88,7 +88,7 @@ try {set image_bytes [read $h]} finally {close $h}
 rl_http instvar h PUT $url -headers {Content-Type image/jpeg} -data $image_bytes
 ~~~
 
-## Exceptions
+### Exceptions
 * RL URI ERROR - the supplied url cannot be parsed.
 * RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme - the scheme specified in the url is not supported.
 * RL HTTP CONNECT timeout - attempting to connect to the server timed out.
