@@ -49,13 +49,13 @@ rl_http uses gc_class, so instance management is best left to bound instance var
 rl_http instvar h GET https://raw.githubusercontent.com/RubyLane/rl_http/master/README.md
 switch -glob -- [$h code] {
     2* {
-		puts "Got result:\n[$h body]"
-		puts "Headers: [$h headers]"
-	}
+        puts "Got result:\n[$h body]"
+        puts "Headers: [$h headers]"
+    }
 
-	default {
-		puts "Something went wrong: [$h code]\n[$h body]"
-	}
+    default {
+        puts "Something went wrong: [$h code]\n[$h body]"
+    }
 }
 ~~~
 
@@ -71,10 +71,10 @@ Response headers (returned by the *headers* method) are represented as a diction
 Request body data supplied in the *-data* option must be fully encoded, matching the Content-Type request header.  For text types this usually means utf-8, for images it should be the raw bytes of the image.
 ~~~tcl
 set json_body {
-	{
-		"hello": "server",
-		"foo": 1234
-	}
+    {
+        "hello": "server",
+        "foo": 1234
+    }
 }
 # utf-8 is the default for application/json, could also be explicit: "application/json; charset=utf-8"
 rl_http instvar h PUT $url -headers {Content-Type application/json} -data [encoding convertto utf-8 $json_body]
