@@ -171,6 +171,7 @@ tsv::lock rl_http_threads {
 			-data_len	""
 			-override_host	""
 			-tapchan	""
+			-useragent	"Ruby Lane HTTP client"
 		} $args]
 
 		set resp_headers_buf	""
@@ -194,7 +195,7 @@ tsv::lock rl_http_threads {
 		    throw [list RL URI ERROR] $err
 		}
 		if {![info exists u(scheme)] || $u(scheme) ni {http https}} {
-			throw [list RL HTTP BAD_URL] "URL scheme \"[if {[info exists u(scheme)]} {set u(scheme)}]\" not supported"
+			throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $u(scheme)] "URL scheme \"[if {[info exists u(scheme)]} {set u(scheme)}]\" not supported"
 		}
 		if {$u(port) eq ""} {
 			set u(port) [dict get {
@@ -341,7 +342,7 @@ tsv::lock rl_http_threads {
 		puts $sock "Accept: [dict get $settings -accept]"
 		puts $sock "Accept-Encoding: gzip, deflate, compress"
 		puts $sock "Accept-Charset: utf-8, iso-8859-1;q=0.5, windows-1252;q=0.5"
-		puts $sock "User-Agent: Ruby Lane HTTP client"
+		puts $sock "User-Agent: [dict get $settings -useragent]"
 		foreach {k v} [dict get $settings -headers] {
 			puts $sock [format {%s: %s} [string trim $k] [string map {"\r" "" "\n" ""} $v]]
 		}

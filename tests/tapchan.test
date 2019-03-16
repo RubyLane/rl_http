@@ -9,7 +9,8 @@ tcl::tm::path add [file dirname [file dirname [file normalize [info script]]]]
 package require rl_http
 
 test tapchan-1.1 {Inspect bytes on the wire with -tapchan} -body { #<<<
-	rl_http create h HEAD http://image0-rubylane.s3.amazonaws.com/0/cart/introbg.gif -timeout 5 -tapchan {rl_http::tapchan}
+	#rl_http create h HEAD http://image0-rubylane.s3.amazonaws.com/0/cart/introbg.gif -timeout 5 -tapchan rl_http::tapchan
+	rl_http create h GET https://raw.githubusercontent.com/RubyLane/rl_http/master/README.md -timeout 5 -tapchan rl_http::tapchan
 	list [h code]
 } -cleanup {
 	if {[info object isa object h]} {h destroy}

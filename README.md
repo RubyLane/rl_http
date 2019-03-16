@@ -18,9 +18,8 @@ Features
 
 Quick Reference
 ---------------
-~~~tcl
 rl_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
-~~~
+
 ### Options
 | Option | Default | Description |
 |--------|---------|-------------|
