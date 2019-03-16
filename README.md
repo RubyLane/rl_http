@@ -14,12 +14,14 @@ Features
 * Chunked-transfer encoding
 * Automatic multi-thread keepalive support
 * Inspection of the read and write events and bytes on the wire for debugging
+* Works in NaviServer / AOLServer / plain Tcl
 
 Quick Reference
 ---------------
 ~~~tcl
 rl_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 ~~~
+### Options
 | Option | Default | Description |
 |--------|---------|-------------|
 | -timeout | 15.0 | Time in seconds after which to consider the request a timeout.  The timeout applies from the start of the connection attempt until the response is fully received.  Use a value of "" to disable |
@@ -34,6 +36,7 @@ rl_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 | -tapchan | | If set, a stacked channel will be layered on top of the socket, with the -tapchan value used as the command prefix for the reflected channel handler.  An example handler is provided as ::rl_http::tapchan, which logs the read and write events and the base64 encoded bytes on the wire, for debugging.  Redefine ::rl_http::log to suit your environment (default writes to stderr) |
 | -useragent | Ruby Lane HTTP client | The value to send as the User-Agent header in the request |
 
+### Instance Methods
 | Method | Arguments | Description |
 |--------|-----------|-------------|
 | code | | The HTTP status code of the response |
@@ -100,6 +103,13 @@ rl_http instvar h PUT $url -headers {Content-Type image/jpeg} -data $image_bytes
 * RL HTTP READ_BODY TOO_BIG $content_length - the returned Content-Length exceeded the limit set by the *-sizelimit* option.
 * RL HTTP READ_BODY unhandled_encoding $enc - the server used an encoding we don't support (and didn't advertise in the request Accept-\* headers)
 * RL HTTP READ_BODY UNHANDLED_CHARSET $charset - the server used a charset we don't support (and didn't advertise in the request Accept-\* headers)
+
+Required Packages
+-----------------
+* uri - from Tcllib
+* gc_class - https://github.com/RubyLane/gc_class
+* tls - for HTTPS support (optional)
+* sockopt - https://github.com/cyanogilvie/sockopt (optional)
 
 License
 -------
