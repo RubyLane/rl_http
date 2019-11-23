@@ -6,6 +6,23 @@ package require Thread
 namespace eval ::rl_http {
 	namespace export *
 
+	proc select_tls_command {} { #<<<
+		if {[llength [info commands ::rl_http::https_socket]]} {
+			return;	# Already done or defined by application
+		}
+		# On Windows, prefer twapi because tls does not keep
+		# trusted root certs updated.
+		if {$::tcl_platform(platform) eq "windows" &&
+		    ![catch {package require twapi}]} {
+			interp alias {} ::rl_http::https_socket {} ::twapi::tls_socket
+			return
+		}
+
+		package require tls
+		interp alias {} ::rl_http::https_socket {} ::tls::socket
+		return
+	}
+	#>>>
 
 	proc log {lvl msg} { #<<<
 		set s		[expr {[clock microseconds] / 1e6}]
@@ -203,7 +220,7 @@ tsv::lock rl_http_threads {
 				https	443
 			} $u(scheme)]
 		}
-		if {$u(scheme) eq "https"} {package require tls}
+		if {$u(scheme) eq "https"} {::rl_http::select_tls_command}
 		if {[string index $u(path) 0] ne "/"} {
 			set u(path)	/$u(path)
 		}
@@ -279,7 +296,7 @@ tsv::lock rl_http_threads {
 		#::rl_http::log debug "Falling back on opening new connection $scheme://$host:$port"
 		switch -- $scheme {
 			http  {set chan	[socket -async $host $port]}
-			https {set chan [tls::socket -async $host $port]}
+			https {set chan [::rl_http::https_socket -async $host $port]}
 			default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
 		}
 		try {
