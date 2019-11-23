@@ -107,7 +107,7 @@ Required Packages
 -----------------
 * uri - from Tcllib
 * gc_class - https://github.com/RubyLane/gc_class
-* tls - for HTTPS support (optional)
+* tls or twapi - for HTTPS support (optional)
 * sockopt - https://github.com/cyanogilvie/sockopt (optional)
 
 License
