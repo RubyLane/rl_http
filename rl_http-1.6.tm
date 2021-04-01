@@ -2,27 +2,11 @@ package require Tcl 8.6
 package require uri	;# from tcllib
 package require gc_class
 package require Thread
+package require parse_args
 
 namespace eval ::rl_http {
 	namespace export *
 
-	proc select_tls_command {} { #<<<
-		if {[llength [info commands ::rl_http::https_socket]]} {
-			return;	# Already done or defined by application
-		}
-		# On Windows, prefer twapi because tls does not keep
-		# trusted root certs updated.
-		if {$::tcl_platform(platform) eq "windows" &&
-		    ![catch {package require twapi}]} {
-			interp alias {} ::rl_http::https_socket {} ::twapi::tls_socket
-			return
-		}
-
-		package require tls
-		interp alias {} ::rl_http::https_socket {} ::tls::socket
-		return
-	}
-	#>>>
 
 	proc log {lvl msg} { #<<<
 		set s		[expr {[clock microseconds] / 1e6}]
@@ -159,6 +143,7 @@ tsv::lock rl_http_threads {
 ::gc_class create ::rl_http {
 	variable {*}{
 		method
+		url
 		wait
 		timeout_afterid
 		u
@@ -170,31 +155,42 @@ tsv::lock rl_http_threads {
 		chunk_buf
 		starttime
 		keepalive
+		collected
+		async_gap_start
 	}
 
-	constructor {a_method url args} { #<<<
+	constructor {a_method a_url args} { #<<<
+		if {"::parse_args" ni [namespace path]} {
+			namespace path [list {*}[namespace path] ::parse_args]
+		}
+
 		set method	$a_method
+		set url		$a_url
 
 		if {[self next] ne ""} next
 
-		set settings [dict merge {
-			-timeout	15
-			-ver		1.1
-			-accept		*/*
-			-headers	{}
-			-sizelimit	""
-			-data		""
-			-data_cb	{}
-			-data_len	""
-			-override_host	""
-			-tapchan	""
-			-useragent	"Ruby Lane HTTP client"
-		} $args]
+		parse_args $args {
+			-timeout		{-default 15}
+			-ver			{-default 1.1}
+			-accept			{-default */*}
+			-headers		{-default {}}
+			-sizelimit		{-default ""}
+			-data			{-default ""}
+			-data_cb		{-default {}}
+			-data_len		{-default ""}
+			-override_host	{-default ""}
+			-tapchan		{-default ""}
+			-useragent		{-default "Ruby Lane HTTP client"}
+            -stats_cx		{-default ""}
+			-async			{-boolean -# {If set, don't wait for the response (get it with [$obj collect] later)}}
+			-keepalive		{-default 1 -# {Not used}}
+		} settings
 
 		set resp_headers_buf	""
 		set resp_body_buf		""
 		set chunk_buf			""
 		set keepalive			yes
+		set collected			false
 
 		set response {
 			headers	{}
@@ -220,7 +216,7 @@ tsv::lock rl_http_threads {
 				https	443
 			} $u(scheme)]
 		}
-		if {$u(scheme) eq "https"} {::rl_http::select_tls_command}
+		if {$u(scheme) eq "https"} {package require tls}
 		if {[string index $u(path) 0] ne "/"} {
 			set u(path)	/$u(path)
 		}
@@ -228,11 +224,35 @@ tsv::lock rl_http_threads {
 		set starttime	[clock microseconds]
 		my _connect
 		my _send_request
+		set async_gap_start	[clock microseconds]
+		if {![dict get $settings async]} {
+			my collect
+		}
+	}
+
+	#>>>
+	destructor { #<<<
+		if {[info exists sock] && $sock in [chan names]} {close $sock}
+		my _cancel_timeout
+		if {[self next] ne ""} next
+	}
+
+	#>>>
+
+	method collect {} { #<<<
+		if {$collected} return
+		if {[dict get $settings async]} {
+			set async_gap	[expr {[clock microseconds] - $async_gap_start}]
+		} else {
+			set async_gap	0
+		}
+
 		my _read_headers
 		my _parse_statusline
 		my _parse_headers $resp_headers_buf
 		my _read_body
-		my _stats [expr {([clock microseconds] - $starttime) / 1e3}]
+		set elapsed	[expr {[clock microseconds] - $starttime - $async_gap}]
+		my _stats [expr {$elapsed / 1e3}]
 
 		my _cancel_timeout
 
@@ -243,13 +263,9 @@ tsv::lock rl_http_threads {
 			my _keepalive_park $sock $u(scheme) $u(host) $u(port) 15
 			unset sock
 		}
-	}
 
-	#>>>
-	destructor { #<<<
-		if {[info exists sock] && $sock in [chan names]} {close $sock}
-		my _cancel_timeout
-		if {[self next] ne ""} next
+		set collected	true
+		return
 	}
 
 	#>>>
@@ -285,8 +301,8 @@ tsv::lock rl_http_threads {
 				}
 				# Check if the remote closed on us >>>
 			} on ok {} {
-				if {[dict get $settings -tapchan] ne ""} {
-					chan push $chan [dict get $settings -tapchan]
+				if {[dict get $settings tapchan] ne ""} {
+					chan push $chan [dict get $settings tapchan]
 				}
 				return $chan
 			} on error {errmsg options} {
@@ -296,7 +312,7 @@ tsv::lock rl_http_threads {
 		#::rl_http::log debug "Falling back on opening new connection $scheme://$host:$port"
 		switch -- $scheme {
 			http  {set chan	[socket -async $host $port]}
-			https {set chan [::rl_http::https_socket -async $host $port]}
+			https {set chan [tls::socket -async $host $port]}
 			default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
 		}
 		try {
@@ -306,8 +322,8 @@ tsv::lock rl_http_threads {
 		} on ok {} {
 			#puts stderr "Set TCP_NODELAY"
 		}
-		if {[dict get $settings -tapchan] ne ""} {
-			chan push $chan [dict get $settings -tapchan]
+		if {[dict get $settings tapchan] ne ""} {
+			chan push $chan [dict get $settings tapchan]
 		}
 		set chan
 	}
@@ -316,7 +332,7 @@ tsv::lock rl_http_threads {
 	method _keepalive_park {chan scheme host port timeout} { #<<<
 		#::rl_http::log notice "Parking $scheme://$host:$port"
 		if {$chan in [chan names]} {
-			if {[dict get $settings -tapchan] ne ""} {
+			if {[dict get $settings tapchan] ne ""} {
 				chan pop $chan
 			}
 			thread::detach $chan
@@ -329,8 +345,8 @@ tsv::lock rl_http_threads {
 		set sock	[my _keepalive_connect $u(scheme) $u(host) $u(port)]
 		chan configure $sock -translation {auto crlf} -blocking 0 -buffering full -buffersize 65536 -encoding ascii
 		chan event $sock writable [namespace code {my _connected}]
-		if {[string is double -strict [dict get $settings -timeout]]} {
-			set timeout_afterid	[after [expr {int([dict get $settings -timeout] * 1000)}] [namespace code {my _timeout}]]
+		if {[string is double -strict [dict get $settings timeout]]} {
+			set timeout_afterid	[after [expr {int([dict get $settings timeout] * 1000)}] [namespace code {my _timeout}]]
 		}
 		if {![info exists wait]} {
 			vwait [namespace current]::wait
@@ -347,38 +363,38 @@ tsv::lock rl_http_threads {
 
 	#>>>
 	method _send_request {} { #<<<
-		puts $sock "$method $u(path)[if {$u(query) ne ""} {set _ ?$u(query)}] HTTP/[dict get $settings -ver]"
-		set have_headers	[lsort -unique [lmap {k v} [dict get $settings -headers] {string tolower $k}]]
+		puts $sock "$method $u(path)[if {$u(query) ne ""} {set _ ?$u(query)}] HTTP/[dict get $settings ver]"
+		set have_headers	[lsort -unique [lmap {k v} [dict get $settings headers] {string tolower $k}]]
 		if {"host" ni $have_headers} {
-			if {[dict get $settings -override_host] ne ""} {
-				puts $sock "Host: [dict get $settings -override_host]"
+			if {[dict get $settings override_host] ne ""} {
+				puts $sock "Host: [dict get $settings override_host]"
 			} else {
 				puts $sock "Host: $u(host)[if {$u(port) != 80} {set _ :$u(port)}]"
 			}
 		}
-		puts $sock "Accept: [dict get $settings -accept]"
+		puts $sock "Accept: [dict get $settings accept]"
 		puts $sock "Accept-Encoding: gzip, deflate, compress"
 		puts $sock "Accept-Charset: utf-8, iso-8859-1;q=0.5, windows-1252;q=0.5"
-		puts $sock "User-Agent: [dict get $settings -useragent]"
-		foreach {k v} [dict get $settings -headers] {
+		puts $sock "User-Agent: [dict get $settings useragent]"
+		foreach {k v} [dict get $settings headers] {
 			puts $sock [format {%s: %s} [string trim $k] [string map {"\r" "" "\n" ""} $v]]
 		}
-		if {[dict get $settings -data] ne ""} {
+		if {[dict get $settings data] ne ""} {
 			# Assumes the declared charset is utf-8.  It's important to add this to the mimetype like so:
 			# Content-Type: text/xml; charset=utf-8
-			puts $sock "Content-Length: [string length [dict get $settings -data]]"
-		} elseif {[string is integer -strict [dict get $settings -data_len]] && [dict get $settings -data_cb] ne ""} {
-			puts $sock "Content-Length: [dict get $settings -data_len]"
+			puts $sock "Content-Length: [string length [dict get $settings data]]"
+		} elseif {[string is integer -strict [dict get $settings data_len]] && [dict get $settings data_cb] ne ""} {
+			puts $sock "Content-Length: [dict get $settings data_len]"
 		}
 		puts $sock "Connection: keep-alive"
 		puts $sock ""
-		if {[dict get $settings -data] ne ""} {
+		if {[dict get $settings data] ne ""} {
 			chan configure $sock -translation {auto binary}
-			puts -nonewline $sock [dict get $settings -data]
+			puts -nonewline $sock [dict get $settings data]
 			chan configure $sock -translation {auto crlf} -encoding ascii
-		} elseif {[dict get $settings -data_cb] ne ""} {
+		} elseif {[dict get $settings data_cb] ne ""} {
 			chan configure $sock -translation {auto binary}
-			uplevel #0 [list {*}[dict get $settings -data_cb] $sock]
+			uplevel #0 [list {*}[dict get $settings data_cb] $sock]
 			chan configure $sock -translation {auto crlf} -encoding ascii
 		}
 		flush $sock
@@ -550,9 +566,9 @@ tsv::lock rl_http_threads {
 
 		if {[dict exists $response headers content-length]} {
 			set content_length	[lindex [dict get $response headers content-length] 0]
-			if {[dict get $settings -sizelimit] ne ""} {
-				if {$content_length > [dict get $settings -sizelimit]} {
-					throw [list RL HTTP READ_BODY TOO_BIG $content_length] "Content-Length exceeds maximum: $content_length > [dict get $settings -sizelimit]"
+			if {[dict get $settings sizelimit] ne ""} {
+				if {$content_length > [dict get $settings sizelimit]} {
+					throw [list RL HTTP READ_BODY TOO_BIG $content_length] "Content-Length exceeds maximum: $content_length > [dict get $settings sizelimit]"
 				}
 			}
 			chan configure $sock -buffersize [expr {min(1000000, $content_length)}]
@@ -597,14 +613,14 @@ tsv::lock rl_http_threads {
 			if {[string length $resp_body_buf] != $content_length} {
 				throw [list RL HTTP READ_BODY truncated] "Expecting $content_length bytes in HTTP response body, got [string length $resp_body_buf]"
 			}
-		} elseif {[dict get $settings -sizelimit] ne ""} {
+		} elseif {[dict get $settings sizelimit] ne ""} {
 			# Need to check the sizelimit here again in-case the server didn't
 			# supply a Content-Length header, although it will be less useful
 			# since we already have the response body in memory, but at least
 			# we can honour the contract with our caller that we won't return a
 			# response bigger than -sizelimit
-			if {[string length $resp_body_buf] > [dict get $settings -sizelimit]} {
-				throw [list RL HTTP READ_BODY TOO_BIG [string length $resp_body_buf]] "Content-Length exceeds maximum: [string length $resp_body_buf] > [dict get $settings -sizelimit]"
+			if {[string length $resp_body_buf] > [dict get $settings sizelimit]} {
+				throw [list RL HTTP READ_BODY TOO_BIG [string length $resp_body_buf]] "Content-Length exceeds maximum: [string length $resp_body_buf] > [dict get $settings sizelimit]"
 			}
 		}
 
@@ -707,7 +723,7 @@ tsv::lock rl_http_threads {
 	#>>>
 
 	foreach accessor {code body headers} {
-		method $accessor {} "dict get \$response [list $accessor]"
+		method $accessor {} "my collect; dict get \$response [list $accessor]"
 	}
 
 	# Utility HTTP-related class methods
