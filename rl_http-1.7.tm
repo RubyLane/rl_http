@@ -207,7 +207,7 @@ tsv::lock rl_http_threads {
 		} on error {res err} {
 		    throw [list RL URI ERROR] $err
 		}
-		if {![info exists u(scheme)] || $u(scheme) ni {http https}} {
+		if {![info exists u(scheme)] || $u(scheme) ni {http https unix}} {
 			throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $u(scheme)] "URL scheme \"[if {[info exists u(scheme)]} {set u(scheme)}]\" not supported"
 		}
 		if {$u(port) eq ""} {
@@ -310,17 +310,32 @@ tsv::lock rl_http_threads {
 			}
 		}
 		#::rl_http::log debug "Falling back on opening new connection $scheme://$host:$port"
-		switch -- $scheme {
-			http  {set chan	[socket -async $host $port]}
-			https {set chan [tls::socket -async $host $port]}
-			default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
-		}
-		try {
-			package require sockopt
-			sockopt::setsockopt $chan SOL_TCP TCP_NODELAY 1
-		} on error {} {
-		} on ok {} {
-			#puts stderr "Set TCP_NODELAY"
+		if {[regexp {^\[(.*)\]$} $host - socket]} {
+			# HTTP-over-unix-domain-sockets
+			package require unix_sockets
+			puts stderr "Connecting to unix_socket ($socket)"
+			switch -- $scheme {
+				http  {set chan	[unix_sockets::connect $socket]}
+				https {
+					set chan	[unix_sockets::connect $socket]
+					tls::import $chan
+				}
+				default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
+			}
+		} else {
+			switch -- $scheme {
+				http  {set chan	[socket -async $host $port]}
+				https {set chan [tls::socket -async $host $port]}
+				default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
+			}
+
+			try {
+				package require sockopt
+				sockopt::setsockopt $chan SOL_TCP TCP_NODELAY 1
+			} on error {} {
+			} on ok {} {
+				#puts stderr "Set TCP_NODELAY"
+			}
 		}
 		if {[dict get $settings tapchan] ne ""} {
 			chan push $chan [dict get $settings tapchan]
@@ -369,7 +384,13 @@ tsv::lock rl_http_threads {
 			if {[dict get $settings override_host] ne ""} {
 				puts $sock "Host: [dict get $settings override_host]"
 			} else {
-				puts $sock "Host: $u(host)[if {$u(port) != 80} {set _ :$u(port)}]"
+				puts stderr "u(host): ($u(host))"
+				if {[regexp {^\[.*\]$} $u(host)]} {
+					# Unix domain socket
+					puts $sock "Host: localhost"
+				} else {
+					puts $sock "Host: $u(host)[if {$u(port) != 80} {set _ :$u(port)}]"
+				}
 			}
 		}
 		puts $sock "Accept: [dict get $settings accept]"
