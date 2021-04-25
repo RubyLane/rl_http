@@ -313,7 +313,6 @@ tsv::lock rl_http_threads {
 		if {[regexp {^\[(.*)\]$} $host - socket]} {
 			# HTTP-over-unix-domain-sockets
 			package require unix_sockets
-			puts stderr "Connecting to unix_socket ($socket)"
 			switch -- $scheme {
 				http  {set chan	[unix_sockets::connect $socket]}
 				https {
@@ -384,7 +383,6 @@ tsv::lock rl_http_threads {
 			if {[dict get $settings override_host] ne ""} {
 				puts $sock "Host: [dict get $settings override_host]"
 			} else {
-				puts stderr "u(host): ($u(host))"
 				if {[regexp {^\[.*\]$} $u(host)]} {
 					# Unix domain socket
 					puts $sock "Host: localhost"
