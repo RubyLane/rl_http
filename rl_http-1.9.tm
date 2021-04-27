@@ -123,7 +123,7 @@ tsv::lock rl_http_threads {
 				foreach {key chaninfo} $to_close {
 					lassign $chaninfo chan expires
 					try {
-						log debug "Closing expired channel $chan to $key"
+						#log debug "Closing expired channel $chan to $key"
 						thread::attach $chan
 						close $chan
 					} on error {errmsg options} {
