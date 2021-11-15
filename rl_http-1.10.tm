@@ -1,5 +1,4 @@
 package require Tcl 8.6
-package require uri	;# from tcllib
 package require gc_class
 package require Thread
 package require parse_args
@@ -7,11 +6,25 @@ package require parse_args
 namespace eval ::rl_http {
 	namespace export *
 
+	# If the resolve package is available, use it for async name resolution
+	variable have_resolve [expr {
+		[catch {package require resolve}] == 0
+	}]
+
+	variable have_reuri [expr {
+		[catch {package require reuri}] == 0
+	}]
+	if {!$have_reuri} {
+		package require uri	;# from tcllib
+	}
 
 	proc log {lvl msg} { #<<<
-		set s		[expr {[clock microseconds] / 1e6}]
-		set frac	[string range [format %.6f [expr {fmod($s, 1.0)}]] 1 end]
-		puts stderr "[clock format [expr {int($s)}] -format "%Y-%m-%d %H:%M:%S$frac" -timezone :UTC] $msg"
+		puts $msg
+		#return
+		## This is slow for some reason ±50 usec
+		#set s		[expr {[clock microseconds] / 1e6}]
+		#set frac	[string range [format %.6f [expr {fmod($s, 1.0)}]] 1 end]
+		#puts stdout "[clock format [expr {int($s)}] -format {%Y-%m-%d %H:%M:%S} -timezone :UTC]$frac $msg"
 	}
 
 	#>>>
@@ -140,7 +153,122 @@ tsv::lock rl_http_threads {
 }
 #>>>
 
+oo::class create rl_http::async_io { #<<<
+	variable {*}{
+		timeout_afterid
+	}
+
+	method _timeout {type message} { #<<<
+		my destroy
+		throw [list RL HTTP TIMEOUT $type] $message
+	}
+
+	#>>>
+	method _connect_async {chanscript seconds} { # Connect to $ip:$port, with timeout support (-async + wait for writable event) <<<
+		my variable _timeout_connect_seq
+		my variable _timeout_connect_res
+
+		set my_seq	[incr _timeout_connect_seq]
+
+		set timeout_afterid	""
+		try {
+			if {[info coroutine] ne ""} {
+				set ev_prefix	[list [info coroutine]]
+				set wait_cmd	{set _timeout_connect_res($my_seq)	[yield]}
+			} else {
+				set ev_prefix	[list set   [namespace current]::_timeout_connect_res($my_seq)]
+				set wait_cmd	[list vwait [namespace current]::_timeout_connect_res($my_seq)]
+			}
+
+			set timeout_afterid		[after [expr {int(round($seconds * 1000))}] [list {*}$ev_prefix timeout]]
+			set before	[clock microseconds]
+			set chan				[uplevel 1 $chanscript]
+			#puts stderr "chan script $chanscript blocked for [format %.3f [expr {([clock microseconds]-$before)/1e3}]] ms"
+			chan event $chan writable [list {*}$ev_prefix connected]
+
+			#puts stderr "Waiting for writable on new chan $chan: $wait_cmd"
+			try $wait_cmd
+			#puts stderr "Got writable on $chan [format %.3f [expr {([clock microseconds]-$before)/1e3}]] ms from start of chan script"
+
+			switch -- $_timeout_connect_res($my_seq) {
+				connected {}
+				timeout { my _timeout CONNECTION "Timeout connecting to server" }
+				default { throw {RL HTTP PANIC} "Unexpected status connecting to server: ($_timeout_connect_res($my_seq))" }
+			}
+		} on error {errmsg options} {
+			catch {
+				close $chan
+				unset chan
+			}
+			return -options $options $errmsg
+		} finally {
+			after cancel $timeout_afterid; set timeout_afterid	""
+			if {[info exists chan] && $chan in [chan names]} {
+				chan event $chan writable {}
+			}
+			unset -nocomplain _timeout_connect_res($my_seq)
+		}
+
+		set chan
+	}
+
+	#>>>
+	method _wait_for_readable {chan seconds} { #<<<
+		my variable _wait_for_readable_seq
+		my variable _wait_for_readable_res
+
+		set my_seq	[incr _wait_for_readable_seq]
+
+		set timeout_afterid	""
+		try {
+			if {[info coroutine] ne ""} {
+				set ev_prefix	[list [info coroutine]]
+				set wait_cmd	{set _wait_for_readable_res($my_seq)	[yield]}
+			} else {
+				set ev_prefix	[list set   [namespace current]::_wait_for_readable_res($my_seq)]
+				set wait_cmd	[list vwait [namespace current]::_wait_for_readable_res($my_seq)]
+			}
+
+			if {$seconds ne ""} {
+				set timeout_afterid	[after [expr {int(round($seconds * 1000))}] [list {*}$ev_prefix timeout]]
+			}
+			chan event $chan readable [list {*}$ev_prefix readable]
+
+			#puts stderr "Waiting for readable on $chan: $wait_cmd <[info frame -1]>"
+			try $wait_cmd
+			#puts stderr "Got readable on $chan"
+
+			switch -- $_wait_for_readable_res($my_seq) {
+				readable {}
+				timeout {
+					my _timeout READ "Timeout waiting for read"
+				}
+				default {
+					throw {RL HTTP PANIC} "Unexpected status waiting for data: ($_wait_for_readable_res($my_seq))"
+				}
+			}
+		} finally {
+			after cancel $timeout_afterid; set timeout_afterid	""
+			if {$chan in [chan names]} {
+				chan event $chan readable {}
+			}
+			unset -nocomplain _wait_for_readable_res($my_seq)
+		}
+	}
+
+	#>>>
+	method _log {lvl msg} { #<<<
+		# Override this to log messages
+	}
+
+	#>>>
+}
+
+#>>>
+
 ::gc_class create ::rl_http {
+	superclass ::rl_http::async_io
+
 	variable {*}{
 		method
 		url
@@ -160,9 +288,7 @@ tsv::lock rl_http_threads {
 	}
 
 	constructor {a_method a_url args} { #<<<
-		if {"::parse_args" ni [namespace path]} {
-			namespace path [list {*}[namespace path] ::parse_args]
-		}
+		namespace path {::oo::Helpers ::parse_args}
 
 		set method	$a_method
 		set url		$a_url
@@ -203,19 +329,30 @@ tsv::lock rl_http_threads {
 		}
 
 		try {
-		    array set u	[uri::split $url]
-		} on error {res err} {
-		    throw [list RL URI ERROR] $err
+			if {$::rl_http::have_reuri} {
+				set u(scheme)	[reuri::uri get $url scheme]
+				set u(host)		[reuri::uri get $url host]
+				set u(port)		[reuri::uri get $url port [expr {
+					$u(scheme) eq "http" ? 80 : 443
+				}]]
+				set u(path)		[reuri::uri get $url path ""]
+				set u(query)	[reuri::uri get $url query ""]
+			} else {
+				array set u	[uri::split $url]
+				if {$u(port) eq ""} {
+					set u(port) [dict get {
+						http	80
+						https	443
+					} $u(scheme)]
+				}
+			}
+		} trap {RL HTTP} {errmsg options} {
+			return -options $options $errmsg
+		} on error {errmsg options} {
+			::rl_http::log error "Error parsing URI [dict get $options -errorcode]: [dict get $options -errorinfo]"
+			throw [list RL URI ERROR] $errmsg
 		}
-		if {![info exists u(scheme)] || $u(scheme) ni {http https unix}} {
-			throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $u(scheme)] "URL scheme \"[if {[info exists u(scheme)]} {set u(scheme)}]\" not supported"
-		}
-		if {$u(port) eq ""} {
-			set u(port) [dict get {
-				http	80
-				https	443
-			} $u(scheme)]
-		}
+
 		if {$u(scheme) eq "https"} {package require tls}
 		if {[string index $u(path) 0] ne "/"} {
 			set u(path)	/$u(path)
@@ -260,6 +397,7 @@ tsv::lock rl_http_threads {
 			close $sock
 			unset sock
 		} else {
+			#::rl_http::log debug "Parking keepalive connection: $sock $u(scheme) $u(host) $u(port)"
 			my _keepalive_park $sock $u(scheme) $u(host) $u(port) 15
 			unset sock
 		}
@@ -269,8 +407,12 @@ tsv::lock rl_http_threads {
 	}
 
 	#>>>
-	method _connected {} { set wait	connected }
-	method _timeout {}   { set wait	timeout }
+	method _timeout {type message} { #<<<
+		# TODO: keep context info to provide a more granular error: timeout during headers read, etc.
+		throw [list RL HTTP TIMEOUT $type] $message
+	}
+
+	#>>>
 	method _cancel_timeout {} { #<<<
 		if {![info exists timeout_afterid]} return
 		after cancel $timeout_afterid; set timeout_afterid	""
@@ -304,28 +446,83 @@ tsv::lock rl_http_threads {
 				if {[dict get $settings tapchan] ne ""} {
 					chan push $chan [dict get $settings tapchan]
 				}
+				#::rl_http::log debug "returning parked chan $chan"
 				return $chan
 			} on error {errmsg options} {
 				::rl_http::log notice "Error attaching to parked chan \"$chan\": [dict get $options -errorinfo]"
 			}
 		}
 		#::rl_http::log debug "Falling back on opening new connection $scheme://$host:$port"
-		if {[regexp {^\[(.*)\]$} $host - socket]} {
+		if {$port eq "<unix>"} {
 			# HTTP-over-unix-domain-sockets
 			package require unix_sockets
 			switch -- $scheme {
-				http  {set chan	[unix_sockets::connect $socket]}
+				http  {set chan	[my _connect_async {unix_sockets::connect $host} [my _remaining_timeout]]}
 				https {
-					set chan	[unix_sockets::connect $socket]
-					tls::import $chan
+					set chan	[my _connect_async {unix_sockets::connect $host} [my _remaining_timeout]]
+					tls::import $chan -require true
 				}
 				default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
 			}
 		} else {
-			switch -- $scheme {
-				http  {set chan	[socket -async $host $port]}
-				https {set chan [tls::socket -async $host $port]}
-				default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
+			if {$::rl_http::have_resolve} {
+				# $port resolution: RFC 3986 doesn't support non-decimal ports in URIs, so we don't
+				# resolve them here
+				if {
+					![tsv::exists _rl_http_resolve_cache $host] ||
+					[clock seconds] - [dict get [tsv::get _rl_http_resolve_cache $host] ts] > 60
+				} {
+					resolve::resolver instvar resolve
+					#::rl_http::log notice "[self] resolving $host"
+					set now	[clock microseconds]
+					$resolve add $host
+					set addrs	[$resolve get $host -timeout [my _remaining_timeout]]
+					#::rl_http::log notice "[self] Got result for $host in [format %.3f [expr {([clock microseconds]-$now)/1e3}]] ms"
+					tsv::set _rl_http_resolve_cache $host [list addrs $addrs ts [clock seconds]]
+					# TODO: maybe have a background grooming thread go through this cache periodically and
+					# remove expired entries?
+				} else {
+					set addrs	[dict get [tsv::get _rl_http_resolve_cache $host] addrs]
+					#::rl_http::log debug "Reused cached addrs for $host:$port: $addrs"
+				}
+			} else {
+				set addrs	[list $host]
+				#::rl_http::log debug "No resolve package available, created addr list as $addrs"
+			}
+
+			# Try each of the resolved addresses in order, fail if all fail to connect
+			set i	0
+			foreach addr $addrs {
+				incr i
+				set chost	$addr
+				set cport	$port
+
+				try {
+					#::rl_http::log debug "attempting to connect to $chost $port for $scheme://$host:$port"
+					switch -- $scheme {
+						http  {set chan	[my _connect_async {socket -async $chost $cport}  [my _remaining_timeout]]}
+						https {
+							set chan [my _connect_async {socket -async $chost $cport}     [my _remaining_timeout]]
+							set before	[clock microseconds]
+							#tls::import $chan -require true
+							tls::import $chan
+							#::rl_http::log debug "tls::import on connected socket: [format %.3f [expr {([clock microseconds] - $before)/1e3}]] ms"
+						}
+						default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
+					}
+					break
+				} on error {errmsg options} {
+					if {$i < [llength $addrs]} {
+						# More remain to try
+						::rl_http::log notice "Error connecting to $chost:$cport for $host:$port, trying next address"
+						continue
+					}
+					return -options $options $errmsg
+				}
+			}
+			if {![info exists chan]} {
+				# Shouldn't be reachable, the last failed addr attempt above should have thrown an error
+				throw [list RL HTTP CONNECT FAILED $scheme://$host:$port] "Couldn't connect to $scheme://$host:$port"
 			}
 
 			try {
@@ -357,22 +554,12 @@ tsv::lock rl_http_threads {
 	#>>>
 	method _connect {} { #<<<
 		set sock	[my _keepalive_connect $u(scheme) $u(host) $u(port)]
-		chan configure $sock -translation {auto crlf} -blocking 0 -buffering full -buffersize 65536 -encoding ascii
-		chan event $sock writable [namespace code {my _connected}]
-		if {[string is double -strict [dict get $settings timeout]]} {
-			set timeout_afterid	[after [expr {int([dict get $settings timeout] * 1000)}] [namespace code {my _timeout}]]
-		}
-		if {![info exists wait]} {
-			vwait [namespace current]::wait
-		}
-		if {[info exists sock] && $sock in [chan names]} {
-			chan event $sock writable {}
-		}
-
-		if {$wait ne "connected"} {
-			throw [list RL HTTP CONNECT $wait] "HTTP connect failed: $wait"
-		}
-		unset wait
+		chan configure $sock \
+			-translation {auto crlf} \
+			-blocking 0 \
+			-buffering full \
+			-buffersize 65536 \
+			-encoding ascii
 	}
 
 	#>>>
@@ -420,51 +607,51 @@ tsv::lock rl_http_threads {
 	}
 
 	#>>>
+	method _remaining_timeout {} { #<<<
+		if {[dict get $settings timeout] eq ""} return
+		set remain	[expr {
+			[dict get $settings timeout] - ([clock microseconds] - $starttime) / 1e6
+		}]
+		if {$remain < 0} {return 0.0}
+		set remain
+	}
+
+	#>>>
 	method _read_headers {} { #<<<
 		chan configure $sock -buffering line -translation {auto crlf} -encoding ascii
-		chan event $sock readable [namespace code {my _readable_headers}]
-		my _readable_headers
-		if {![info exists wait]} {
-			vwait [namespace current]::wait
-		}
-		set headers_status	$wait
-		unset wait
-		if {[info exists sock] && $sock in [chan names]} {
-			chan event $sock readable {}
+		while 1 {
+			set before	[clock microseconds]
+			set line	[gets $sock]
+			set elapsed_usec	[expr {[clock microseconds] - $before}]
+			if {[eof $sock]} {
+				set headers_status	dropped
+				break
+			}
+
+			if {![chan blocked $sock]} {
+				if {![dict exists $response statusline]} {
+					if {$line eq ""} {
+						# This is expressly forbidden in the HTTP RFC, but for some
+						# reason I'm getting these from the sugarcrm rest api
+						continue
+					}
+					dict set response statusline $line
+					continue
+				}
+
+				if {$line eq ""} {
+					set headers_status	ok
+					break
+				}
+
+				append resp_headers_buf $line \n
+			} else {
+				my _wait_for_readable $sock [my _remaining_timeout]
+			}
 		}
 
 		if {$headers_status ne "ok"} {
 			throw [list RL HTTP READ_HEADERS $headers_status] "Error reading HTTP headers: $headers_status"
-		}
-	}
-
-	#>>>
-	method _readable_headers {} { #<<<
-		while 1 {
-			set line	[gets $sock]
-			if {[eof $sock]} {
-				set wait dropped
-				return
-			}
-
-			if {[chan blocked $sock]} return
-
-			if {![dict exists $response statusline]} {
-				if {$line eq ""} {
-					# This is expressly forbidden in the HTTP RFC, but for some
-					# reason I'm getting these from the sugarcrm rest api
-					continue
-				}
-				dict set response statusline $line
-				continue
-			}
-
-			if {$line eq ""} {
-				set wait	ok
-				return
-			}
-
-			append resp_headers_buf $line \n
 		}
 	}
 
@@ -501,34 +688,23 @@ tsv::lock rl_http_threads {
 	}
 
 	#>>>
-	method _readable_chunk_control {} { #<<<
-		set chunk_buf	[gets $sock]
-
-		if {[eof $sock]} {
-			set wait dropped
-			return
-		}
-
-		if {$chunk_buf eq "" && [chan blocked $sock]} {
-			return
-		}
-
-		set wait	ok
-	}
-
-	#>>>
 	method _read_chunk_control {} { #<<<
 		chan configure $sock -translation {auto crlf} -encoding ascii -buffering line
-		chan event $sock readable [namespace code {my _readable_chunk_control}]
-		my _readable_chunk_control
 
-		if {![info exists wait]} {
-			vwait [namespace current]::wait
-		}
-		set body_status	$wait
-		unset wait
-		if {[info exists sock] && $sock in [chan names]} {
-			chan event $sock readable {}
+		while 1 {
+			set chunk_buf	[gets $sock]
+
+			if {[eof $sock]} {
+				set body_status	dropped
+				break
+			}
+
+			if {![chan blocked $sock]} {
+				set body_status	ok
+				break
+			}
+
+			my _wait_for_readable $sock [my _remaining_timeout]
 		}
 
 		if {$body_status ne "ok"} {
@@ -554,16 +730,13 @@ tsv::lock rl_http_threads {
 	method _read_chunk_data length { #<<<
 		set expecting	[expr {$length + 2}]		;# +2: trailing \r\n
 		chan configure $sock -buffersize [expr {min(1000000, $expecting)}] -buffering full -translation binary
-		chan event $sock readable [namespace code [list my _readable_body $expecting]]
-		my _readable_body $expecting
-		if {![info exists wait]} {
-			vwait [namespace current]::wait
+
+		while 1 {
+			my _readable_body $expecting
+			if {[info exists wait]} break
+			my _wait_for_readable $sock [my _remaining_timeout]
 		}
 		set body_status	$wait
-		unset wait
-		if {[info exists sock] && $sock in [chan names]} {
-			chan event $sock readable {}
-		}
 
 		if {$body_status ne "ok"} {
 			throw [list RL HTTP READ_BODY $body_status] "Error reading HTTP response chunk: $body_status"
@@ -609,17 +782,13 @@ tsv::lock rl_http_threads {
 			} else {
 				set expecting	""
 			}
-			chan event $sock readable [namespace code [list my _readable_body $expecting]]
-			my _readable_body $expecting
-			if {![info exists wait]} {
-				vwait [namespace current]::wait
+
+			while 1 {
+				my _readable_body $expecting
+				if {[info exists wait]} break
+				my _wait_for_readable $sock [my _remaining_timeout]
 			}
 			set body_status	$wait
-			unset wait
-
-			if {[info exists sock] && $sock in [chan names]} {
-				chan event $sock readable {}
-			}
 
 			if {$body_status ne "ok"} {
 				throw [list RL HTTP READ_BODY $body_status] "Error reading HTTP response body: $body_status"

@@ -1,4 +1,4 @@
-RL_HTTP
+RL\_HTTP
 =======
 
 This package provides a REST-capable, entirely non-blocking HTTP client library.
@@ -15,10 +15,12 @@ Features
 * Automatic multi-thread keepalive support
 * Inspection of the read and write events and bytes on the wire for debugging
 * Works in NaviServer / AOLServer / plain Tcl
+* Supports HTTP over unix domain sockets (with the unix\_sockets package)
+* Fully async single threaded mode if called from coroutines, partial support with vwait if not
 
 Quick Reference
 ---------------
-rl_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
+rl\_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 
 ### Options
 | Option | Default | Description |
@@ -27,12 +29,12 @@ rl_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 | -ver | 1.1 | The HTTP version to declare in the request |
 | -accept | \*/\* | The Accept header to send with the request |
 | -headers | | The request headers to send, as a list similar to a dictionary but allowing duplicate keys: HTTP headers can be multivalued |
-| -sizelimit | |  If set, and the returned Content-Length is larger than this value, and exception will be raised: {RL HTTP READ_BODY TOO_BIG $content_length} |
+| -sizelimit | |  If set, and the returned Content-Length is larger than this value, and exception will be raised: {RL HTTP READ\_BODY TOO\_BIG $content\_length} |
 | -data | | The body of the request.  Must already be encoded to bytes |
-| -data_cb | | If set, the value is used as a command prefix to invoke to write the request body to the socket.  The socket channel is appended as the first argument.  The channel is in binary mode for writing |
-| -data_len | | If -data_cb is used, the -data_len option can be used to supply a Content-Length header in the request |
-| -override_host | | If set, use the supplied value as the request Host header, otherwise default to the authority section of the supplied url |
-| -tapchan | | If set, a stacked channel will be layered on top of the socket, with the -tapchan value used as the command prefix for the reflected channel handler.  An example handler is provided as ::rl_http::tapchan, which logs the read and write events and the base64 encoded bytes on the wire, for debugging.  Redefine ::rl_http::log to suit your environment (default writes to stderr) |
+| -data\_cb | | If set, the value is used as a command prefix to invoke to write the request body to the socket.  The socket channel is appended as the first argument.  The channel is in binary mode for writing |
+| -data\_len | | If -data\_cb is used, the -data\_len option can be used to supply a Content-Length header in the request |
+| -override\_host | | If set, use the supplied value as the request Host header, otherwise default to the authority section of the supplied url |
+| -tapchan | | If set, a stacked channel will be layered on top of the socket, with the -tapchan value used as the command prefix for the reflected channel handler.  An example handler is provided as ::rl\_http::tapchan, which logs the read and write events and the base64 encoded bytes on the wire, for debugging.  Redefine ::rl\_http::log to suit your environment (default writes to stderr) |
 | -useragent | Ruby Lane HTTP client | The value to send as the User-Agent header in the request |
 
 ### Instance Methods
@@ -45,10 +47,10 @@ rl_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 Usage
 -----
 
-rl_http uses gc_class, so instance management is best left to bound instance variables:
+rl\_http uses gc\_class, so instance management is best left to bound instance variables:
 
 ~~~tcl
-rl_http instvar h GET https://raw.githubusercontent.com/RubyLane/rl_http/master/README.md
+rl\_http instvar h GET https://raw.githubusercontent.com/RubyLane/rl\_http/master/README.md
 switch -glob -- [$h code] {
     2* {
         puts "Got result:\n[$h body]"
@@ -62,7 +64,7 @@ switch -glob -- [$h code] {
 ~~~
 
 When $h is unset (usually because it went out of scope), or its value is
-changed, the instance of rl_http will be destroyed.
+changed, the instance of rl\_http will be destroyed.
 
 ### Headers
 
@@ -72,43 +74,46 @@ Response headers (returned by the *headers* method) are represented as a diction
 
 Request body data supplied in the *-data* option must be fully encoded, matching the Content-Type request header.  For text types this usually means utf-8, for images it should be the raw bytes of the image.
 ~~~tcl
-set json_body {
+set json\_body {
     {
         "hello": "server",
         "foo": 1234
     }
 }
 # utf-8 is the default for application/json, could also be explicit: "application/json; charset=utf-8"
-rl_http instvar h PUT $url -headers {Content-Type application/json} -data [encoding convertto utf-8 $json_body]
+rl\_http instvar h PUT $url -headers {Content-Type application/json} -data [encoding convertto utf-8 $json\_body]
 ~~~
 
 ~~~tcl
 set h	[open avatar.jpg rb]
-try {set image_bytes [read $h]} finally {close $h}
-rl_http instvar h PUT $url -headers {Content-Type image/jpeg} -data $image_bytes
+try {set image\_bytes [read $h]} finally {close $h}
+rl\_http instvar h PUT $url -headers {Content-Type image/jpeg} -data $image\_bytes
 ~~~
 
 ### Exceptions
 * RL URI ERROR - the supplied url cannot be parsed.
-* RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme - the scheme specified in the url is not supported.
+* RL HTTP CONNECT UNSUPPORTED\_SCHEME $scheme - the scheme specified in the url is not supported.
 * RL HTTP CONNECT timeout - attempting to connect to the server timed out.
-* RL HTTP READ_HEADERS timeout - timeout while reading the response headers from the server.
-* RL HTTP READ_HEADERS dropped - the TCP connection was closed while reading the response headers.
-* RL HTTP PARSE_HEADERS $line - error parsing the response status line or headers.
-* RL HTTP READ_BODY timeout - timeout while reading the response body.
-* RL HTTP READ_BODY dropped - the TCP connection was closed while reading the body.
-* RL HTTP READ_BODY truncated - the server returned fewer bytes in the body than it promised in the Content-Length response header.
-* RL HTTP READ_BODY CORRUPT_CHUNKED - the server returned malformed Transfer-Encoding: Chunked data.
-* RL HTTP READ_BODY TOO_BIG $content_length - the returned Content-Length exceeded the limit set by the *-sizelimit* option.
-* RL HTTP READ_BODY unhandled_encoding $enc - the server used an encoding we don't support (and didn't advertise in the request Accept-\* headers)
-* RL HTTP READ_BODY UNHANDLED_CHARSET $charset - the server used a charset we don't support (and didn't advertise in the request Accept-\* headers)
+* RL HTTP READ\_HEADERS timeout - timeout while reading the response headers from the server.
+* RL HTTP READ\_HEADERS dropped - the TCP connection was closed while reading the response headers.
+* RL HTTP PARSE\_HEADERS $line - error parsing the response status line or headers.
+* RL HTTP READ\_BODY timeout - timeout while reading the response body.
+* RL HTTP READ\_BODY dropped - the TCP connection was closed while reading the body.
+* RL HTTP READ\_BODY truncated - the server returned fewer bytes in the body than it promised in the Content-Length response header.
+* RL HTTP READ\_BODY CORRUPT\_CHUNKED - the server returned malformed Transfer-Encoding: Chunked data.
+* RL HTTP READ\_BODY TOO\_BIG $content\_length - the returned Content-Length exceeded the limit set by the *-sizelimit* option.
+* RL HTTP READ\_BODY unhandled\_encoding $enc - the server used an encoding we don't support (and didn't advertise in the request Accept-\* headers)
+* RL HTTP READ\_BODY UNHANDLED\_CHARSET $charset - the server used a charset we don't support (and didn't advertise in the request Accept-\* headers)
 
 Required Packages
 -----------------
-* uri - from Tcllib
-* gc_class - https://github.com/RubyLane/gc_class
+* gc\_class - https://github.com/RubyLane/gc\_class
+* uri - from Tcllib (required if reuri is not available)
 * tls or twapi - for HTTPS support (optional)
-* sockopt - https://github.com/cyanogilvie/sockopt (optional)
+* sockopt - https://github.com/cyanogilvie/sockopt - sets TCP\_NODELAY (optional)
+* unix\_sockets - https://github.com/cyanogilvie/unix\_sockets - adds support for HTTP-over-UDS (optional)
+* resolve - https://github.com/cyanogilvie/resolve - adds support for async name resolution and caching (optional)
+* reuri - https://github.com/cyanogilvie/reuri - faster URI parsing (optional)
 
 License
 -------
