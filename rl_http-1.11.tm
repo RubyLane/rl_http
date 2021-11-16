@@ -732,6 +732,7 @@ oo::class create rl_http::async_io { #<<<
 		chan configure $sock -buffersize [expr {min(1000000, $expecting)}] -buffering full -translation binary
 
 		while 1 {
+			unset -nocomplain wait
 			my _readable_body $expecting
 			if {[info exists wait]} break
 			my _wait_for_readable $sock [my _remaining_timeout]
