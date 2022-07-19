@@ -28,6 +28,9 @@ namespace eval ::rl_http {
 	}
 
 	#>>>
+	if {[llength [info commands utf8buffer]]} {
+		utf8buffer destroy
+	}
 	::gc_class create utf8buffer { #<<<
 		variable {*}{
 			utf8chunks
@@ -153,6 +156,9 @@ tsv::lock rl_http_threads {
 }
 #>>>
 
+if {[llength [info commands rl_http::async_io]]} {
+	rl_http::async_io destroy
+}
 oo::class create rl_http::async_io { #<<<
 	variable {*}{
 		timeout_afterid
@@ -399,12 +405,16 @@ oo::class create rl_http::async_io { #<<<
 
 		my _cancel_timeout
 
-		if {[dict exists $response headers connection] && "close" in [dict get $response headers connection]} {
-			close $sock
-			unset sock
+		if {$sock in [chan names]} {
+			if {[dict exists $response headers connection] && "close" in [dict get $response headers connection]} {
+				close $sock
+				unset sock
+			} else {
+				#::rl_http::log debug "Parking keepalive connection: $sock $u(scheme) $u(host) $u(port)"
+				my _keepalive_park $sock $u(scheme) $u(host) $u(port) 15
+				unset sock
+			}
 		} else {
-			#::rl_http::log debug "Parking keepalive connection: $sock $u(scheme) $u(host) $u(port)"
-			my _keepalive_park $sock $u(scheme) $u(host) $u(port) 15
 			unset sock
 		}
 
@@ -576,7 +586,7 @@ oo::class create rl_http::async_io { #<<<
 			if {[dict get $settings override_host] ne ""} {
 				puts $sock "Host: [dict get $settings override_host]"
 			} else {
-				if {[regexp {^\[.*\]$} $u(host)]} {
+				if {$u(port) eq "<unix>"} {
 					# Unix domain socket
 					puts $sock "Host: localhost"
 				} else {
