@@ -12,7 +12,7 @@ namespace eval ::rl_http {
 	}]
 
 	variable have_reuri [expr {
-		[catch {package require reuri}] == 0
+		[catch {package require reuri 0.2.4}] == 0
 	}]
 	if {!$have_reuri} {
 		package require uri	;# from tcllib
@@ -332,14 +332,20 @@ oo::class create rl_http::async_io { #<<<
 			if {$::rl_http::have_reuri} {
 				set u(scheme)	[reuri::uri get $url scheme]
 				set u(host)		[reuri::uri get $url host]
-				set u(port)		[reuri::uri get $url port [expr {
-					$u(scheme) eq "http" ? 80 : 443
-				}]]
+				if {[reuri::uri get $url hosttype] eq "local"} {
+					set u(port)		"<unix>"
+				} else {
+					set u(port)		[reuri::uri get $url port [expr {
+						$u(scheme) eq "http" ? 80 : 443
+					}]]
+				}
 				set u(path)		[reuri::uri get $url path ""]
 				set u(query)	[reuri::uri get $url query ""]
 			} else {
 				array set u	[uri::split $url]
-				if {$u(port) eq ""} {
+				if {[regexp {^\[(?:v0.local:)?(/.*)\]$} $u(host) - u(host)]} {
+					set u(port)	"<unix>"
+				} elseif {$u(port) eq ""} {
 					set u(port) [dict get {
 						http	80
 						https	443

@@ -5,8 +5,7 @@ if {"::tcltest" ni [namespace children]} {
 	namespace import ::tcltest::*
 }
 
-tcl::tm::path add [file dirname [file dirname [file normalize [info script]]]]
-package require rl_http
+source tests/common.tcl
 
 test tapchan-1.1 {Inspect bytes on the wire with -tapchan} -body { #<<<
 	#rl_http create h HEAD http://image0-rubylane.s3.amazonaws.com/0/cart/introbg.gif -timeout 5 -tapchan rl_http::tapchan
@@ -25,4 +24,3 @@ $}
 return
 
 # vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4
-
