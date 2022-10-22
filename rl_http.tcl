@@ -18,16 +18,20 @@ namespace eval ::rl_http {
 		package require uri	;# from tcllib
 	}
 
-	proc log {lvl msg} { #<<<
-		puts $msg
-		#return
-		## This is slow for some reason ±50 usec
-		#set s		[expr {[clock microseconds] / 1e6}]
-		#set frac	[string range [format %.6f [expr {fmod($s, 1.0)}]] 1 end]
-		#puts stdout "[clock format [expr {int($s)}] -format {%Y-%m-%d %H:%M:%S} -timezone :UTC]$frac $msg"
-	}
+	if {[llength [info commands ::log]]} {
+		interp alias {} ::rl_http::log {} ::log
+	} else {
+		proc log {lvl msg} { #<<<
+			puts $msg
+			#return
+			## This is slow for some reason ±50 usec
+			#set s		[expr {[clock microseconds] / 1e6}]
+			#set frac	[string range [format %.6f [expr {fmod($s, 1.0)}]] 1 end]
+			#puts stdout "[clock format [expr {int($s)}] -format {%Y-%m-%d %H:%M:%S} -timezone :UTC]$frac $msg"
+		}
 
-	#>>>
+		#>>>
+	}
 	if {[llength [info commands utf8buffer]]} {
 		utf8buffer destroy
 	}
@@ -72,6 +76,7 @@ namespace eval ::rl_http {
 
 		proc initialize {chan mode} { #<<<
 			::rl_http::log debug "rl_http tapchan $chan initialize $mode"
+			#return {initialize finalize read write flush drain clear}
 			return {initialize finalize read write}
 		}
 
@@ -80,6 +85,24 @@ namespace eval ::rl_http {
 		proc read {chan bytes} { #<<<
 			::rl_http::log debug "rl_http tapchan $chan read [binary encode base64 $bytes]"
 			set bytes
+		}
+
+		#>>>
+		proc flush chan { #<<<
+			::rl_http::log debug "rl_http tapchan $chan flush"
+			return {}
+		}
+
+		#>>>
+		proc clear chan { #<<<
+			::rl_http::log debug "rl_http tapchan $chan clear"
+			return {}
+		}
+
+		#>>>
+		proc drain chan { #<<<
+			::rl_http::log debug "rl_http tapchan $chan drain"
+			return {}
 		}
 
 		#>>>
@@ -120,24 +143,25 @@ tsv::lock rl_http_threads {
 				set now			[clock seconds]
 				set to_close	{}
 				tsv::lock rl_http_keepalive_chans {
-					foreach key [tsv::array names rl_http_keepalive_chans] {
-						for {set i 0} {$i < [tsv::llength rl_http_keepalive_chans $key]} {incr i} {
-							lassign [tsv::lindex rl_http_keepalive_chans $key $i] chan expires
-
+					foreach {key parked_chans} [tsv::array get rl_http_keepalive_chans] {
+						set pruned	[lmap chaninfo $parked_chans {
+							lassign $chaninfo chan expires
 							if {$now > $expires} {
-								# Defer the actual closing until after we release the lock on rl_http_keepalive_chans
-								lappend to_close	$key [tsv::lpop rl_http_keepalive_chans $key $i]
+								lappend to_close	$key $chan
+								continue
 							}
-						}
+							set chaninfo
+						}]
 
-						if {[tsv::llength rl_http_keepalive_chans $key] == 0} {
+						if {[llength $pruned] == 0} {
 							tsv::unset rl_http_keepalive_chans $key
+						} else {
+							tsv::set rl_http_keepalive_chans $key $pruned
 						}
 					}
 				}
 
-				foreach {key chaninfo} $to_close {
-					lassign $chaninfo chan expires
+				foreach {key chan} $to_close {
 					try {
 						#log debug "Closing expired channel $chan to $key"
 						thread::attach $chan
@@ -444,7 +468,7 @@ oo::class create rl_http::async_io { #<<<
 			}
 		}
 		#::rl_http::log debug "Looking for parked connection $key: [tsv::array get rl_http_keepalive_chans]"
-		while {[set chaninfo [tsv::lpop rl_http_keepalive_chans $key 0]] ne ""} {
+		while {[set chaninfo [tsv::lpop rl_http_keepalive_chans $key]] ne ""} {
 			lassign $chaninfo chan expiry
 			#::rl_http::log debug "[self] reusing $chan for $scheme://$host:$port"
 			try {
@@ -453,7 +477,7 @@ oo::class create rl_http::async_io { #<<<
 				chan configure $chan -blocking 0
 				chan read $chan
 				if {[chan eof $chan]} {
-					::rl_http::log notice "parked chan collapsed: $chan"
+					::rl_http::log notice "parked chan collapsed: $chan for $key (remain: [tsv::get rl_http_keepalive_chans $key])"
 					chan close $chan
 					continue
 				}
@@ -563,7 +587,7 @@ oo::class create rl_http::async_io { #<<<
 				chan pop $chan
 			}
 			thread::detach $chan
-			tsv::lappend rl_http_keepalive_chans $scheme://$host:$port [list $chan [expr {[clock seconds] + $timeout}]]
+			tsv::lpush rl_http_keepalive_chans $scheme://$host:$port [list $chan [expr {[clock seconds] + $timeout}]]
 		}
 	}
 

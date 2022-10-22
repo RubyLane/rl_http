@@ -25,7 +25,6 @@ gc_class create uds_server {
 			package require unix_sockets
 			set sockname	/tmp/rl_http_%testname%-[pid].sock
 			set listen	[unix_sockets::listen $sockname [list apply {{sock args} {
-				puts stderr "Accepting uds connection $sock: $args"
 				chan configure $sock -blocking 0 -translation {auto lf} -encoding binary
 				read $sock
 				puts -nonewline $sock "HTTP/1.1 200 Ok\nContent-Length: 2\nContent-Type: text/plain\nServer: Test\nDate: [clock format [clock seconds] -format "%a, %d %b %Y %T GMT" -timezone :UTC]\n\nok"

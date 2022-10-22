@@ -1,15 +1,15 @@
 if {[llength [info commands replay_server]] > 0} return
 try {
 
-set here	[file dirname [file normalize [info script]]]
-set pathlist	[tcl::tm::path list]
-tcl::tm::path remove {*}$pathlist
-tcl::tm::path add {*}[list [pwd] {*}[lreverse $pathlist]]
-puts stderr "tm path:\n\t[join [tcl::tm::path list] \n\t]"
-package require rl_http 1.12
+tcltest::loadTestedCommands
+package require rl_http
 package require md5
 package require chantricks
 package require uri
+
+proc ::rl_http::log {lvl msg} {
+	puts stderr $msg
+}
 
 proc parse_reqs bytes { #<<<
     set rl_httpreqs	{}
