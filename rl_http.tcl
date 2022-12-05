@@ -462,13 +462,21 @@ oo::class create rl_http::async_io { #<<<
 	method _keepalive_connect {scheme host port} { #<<<
 		#::rl_http::log debug "[self] _keepalive_connect $scheme $host $port"
 		set key		$scheme://$host:$port
-		tsv::lock rl_http_keepalive_chans {
-			if {![tsv::exists rl_http_keepalive_chans $key]} {
-				tsv::set rl_http_keepalive_chans $key {}
+		set popchan {key { # Retrieve the next idle keepalive channel for $key <<<
+			tsv::lock rl_http_keepalive_chans {
+				if {![tsv::exists rl_http_keepalive_chans $key]} {
+					return {}
+				}
+				set chan	[tsv::lpop rl_http_keepalive_chans $key]
+				if {$chan eq ""} {
+					tsv::unset rl_http_keepalive_chans $key
+				}
+				set chan
 			}
-		}
+		}}
+		#>>>
 		#::rl_http::log debug "Looking for parked connection $key: [tsv::array get rl_http_keepalive_chans]"
-		while {[set chaninfo [tsv::lpop rl_http_keepalive_chans $key]] ne ""} {
+		while {[set chaninfo [apply $popchan $key]] ne ""} {
 			lassign $chaninfo chan expiry
 			#::rl_http::log debug "[self] reusing $chan for $scheme://$host:$port"
 			try {
