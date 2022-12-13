@@ -119,7 +119,7 @@ namespace eval ::rl_http {
 tsv::lock rl_http_threads {
 	if {![tsv::exists rl_http_threads keepalive_handler]} {
 
-		if {[info commands ns_thread] eq ""} {
+		if {[info commands ns_thread] eq "" && [catch {package present ns_shim}]} {
 			set start_thread	thread::create
 		} else {
 			# using thread::create in Naviserver seems to cause a deadlock (at least when called during server startup)
