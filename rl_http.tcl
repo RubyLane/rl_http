@@ -721,7 +721,40 @@ oo::class create rl_http::async_io { #<<<
 			if {![regexp {^([^:]+):\s*(.*)$} $line - k v]} {
 				throw [list RL HTTP PARSE_HEADERS $line] "Unable to parse HTTP response header line: \"$line\""
 			}
-			my _append_headers [string tolower $k] [lmap e [split $v ,] {string trim $e}]
+			set kl	[string tolower $k]
+
+			set vl	[if {$kl in {
+				age
+				authorization
+				content-length
+				content-location
+				content-md5
+				content-range
+				content-type
+				date
+				etag
+				expires
+				from
+				host
+				if-modified-since
+				if-range
+				if-unmodified-since
+				last-modified
+				location
+				max-forwards
+				proxy-authentication
+				range
+				referer
+				retry-after
+				server
+				user-agent
+			}} {
+				list [string trim $v]
+			} else {
+				lmap e [split $v ,] {string trim $e}
+			}]
+
+			my _append_headers $kl [lmap e $vl {string trim $e}]
 		}
 	}
 
