@@ -748,6 +748,8 @@ oo::class create rl_http::async_io { #<<<
 				retry-after
 				server
 				user-agent
+				set-cookie
+				cookie
 			}} {
 				list [string trim $v]
 			} else {
