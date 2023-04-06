@@ -12,7 +12,7 @@ namespace eval ::rl_http {
 	}]
 
 	variable have_reuri [expr {
-		[catch {package require reuri 0.9}] == 0
+		[catch {package require reuri 0.10}] == 0
 	}]
 	if {!$have_reuri} {
 		package require uri	;# from tcllib
@@ -364,6 +364,7 @@ oo::class create rl_http::async_io { #<<<
 				set u(host)		[reuri::uri get $url host]
 				if {[reuri::uri get $url hosttype] eq "local"} {
 					set u(port)		"<unix>"
+					set u(host)		[file join {*}$u(host)]
 				} else {
 					set u(port)		[reuri::uri get $url port [expr {
 						$u(scheme) eq "http" ? 80 : 443
@@ -614,15 +615,22 @@ oo::class create rl_http::async_io { #<<<
 	method _send_request {} { #<<<
 		puts $sock "$method $u(path)[if {$u(query) ne ""} {set _ ?$u(query)}] HTTP/[dict get $settings ver]"
 		set have_headers	[lsort -unique [lmap {k v} [dict get $settings headers] {string tolower $k}]]
+
+		if {$::rl_http::have_reuri} {
+			set encode_host {str {reuri::uri encode host $str}}
+		} else {
+			set encode_host {str {set str}}	;# Wrong, but matches what was happening before, so not a regression
+		}
+
 		if {"host" ni $have_headers} {
 			if {[dict get $settings override_host] ne ""} {
-				puts $sock "Host: [dict get $settings override_host]"
+				puts $sock "Host: [apply $encode_host [dict get $settings override_host]]"
 			} else {
 				if {$u(port) eq "<unix>"} {
 					# Unix domain socket
 					puts $sock "Host: localhost"
 				} else {
-					puts $sock "Host: $u(host)[if {$u(port) != 80} {set _ :$u(port)}]"
+					puts $sock "Host: [apply $encode_host $u(host)][if {$u(port) != 80} {set _ :$u(port)}]"
 				}
 			}
 		}
@@ -999,7 +1007,9 @@ oo::class create rl_http::async_io { #<<<
 	}
 
 	# Utility HTTP-related class methods
-	if {[info commands ns_urlencode] eq ""} {
+	if {$::rl_http::have_reuri} {
+		self method encode_query_params args {reuri::query new $args}
+	} elseif {[info commands ns_urlencode] eq ""} {
 		package require http
 		self method encode_query_params args { #<<<
 			http::formatQuery {*}$args
