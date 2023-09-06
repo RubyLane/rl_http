@@ -552,9 +552,9 @@ oo::class create rl_http::async_io { #<<<
 						http  {set chan	[my _connect_async {socket -async $chost $cport}  [my _remaining_timeout]]}
 						https {
 							set chan [my _connect_async {socket -async $chost $cport}     [my _remaining_timeout]]
-							set before	[clock microseconds]
+							#set before	[clock microseconds]
 							#tls::import $chan -require true
-							tls::import $chan
+							tls::import $chan -servername $host
 							#::rl_http::log debug "tls::import on connected socket: [format %.3f [expr {([clock microseconds] - $before)/1e3}]] ms"
 						}
 						default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
