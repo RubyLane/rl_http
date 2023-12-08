@@ -12,7 +12,7 @@ namespace eval ::rl_http {
 	}]
 
 	variable have_reuri [expr {
-		[catch {package require reuri 0.10}] == 0
+		[catch {package require reuri 0.13}] == 0
 	}]
 	if {!$have_reuri} {
 		package require uri	;# from tcllib
@@ -133,7 +133,7 @@ tsv::lock rl_http_threads {
 				proc log {lvl msg} {
 					set s		[expr {[clock microseconds] / 1e6}]
 					set frac	[string range [format %.6f [expr {fmod($s, 1.0)}]] 1 end]
-					puts stderr "[clock format [expr {int($s)}] -format "%Y-%m-%d %H:%M:%S$frac" -timezone :UTC] $msg"
+					puts stderr "[clock format [expr {int($s)}] -format "%Y-%m-%d %H:%M:%S" -timezone :UTC]$frac $msg"
 				}
 			}
 
@@ -360,18 +360,18 @@ oo::class create rl_http::async_io { #<<<
 
 		try {
 			if {$::rl_http::have_reuri} {
-				set u(scheme)	[reuri::uri get $url scheme]
-				set u(host)		[reuri::uri get $url host]
-				if {[reuri::uri get $url hosttype] eq "local"} {
+				set u(scheme)	[reuri get $url scheme]
+				set u(host)		[reuri get $url host]
+				if {[reuri get $url hosttype] eq "local"} {
 					set u(port)		"<unix>"
 					set u(host)		[file join {*}$u(host)]
 				} else {
-					set u(port)		[reuri::uri get $url port [expr {
+					set u(port)		[reuri get $url port [expr {
 						$u(scheme) eq "http" ? 80 : 443
 					}]]
 				}
-				set u(path)		[reuri::uri extract $url path ""]
-				set u(query)	[reuri::uri extract $url query ""]
+				set u(path)		[reuri extract $url path ""]
+				set u(query)	[reuri extract $url query ""]
 			} else {
 				array set u	[uri::split $url]
 				if {[regexp {^\[(?:v0.local:)?(/.*)\]$} $u(host) - u(host)]} {
@@ -617,7 +617,7 @@ oo::class create rl_http::async_io { #<<<
 		set have_headers	[lsort -unique [lmap {k v} [dict get $settings headers] {string tolower $k}]]
 
 		if {$::rl_http::have_reuri} {
-			set encode_host {str {reuri::uri encode host $str}}
+			set encode_host {str {reuri encode host $str}}
 		} else {
 			set encode_host {str {set str}}	;# Wrong, but matches what was happening before, so not a regression
 		}
@@ -676,9 +676,9 @@ oo::class create rl_http::async_io { #<<<
 	method _read_headers {} { #<<<
 		chan configure $sock -buffering line -translation {auto crlf} -encoding ascii
 		while 1 {
-			set before	[clock microseconds]
+			#set before	[clock microseconds]
 			set line	[gets $sock]
-			set elapsed_usec	[expr {[clock microseconds] - $before}]
+			#set elapsed_usec	[expr {[clock microseconds] - $before}]
 			if {[eof $sock]} {
 				set headers_status	dropped
 				break
@@ -687,11 +687,11 @@ oo::class create rl_http::async_io { #<<<
 			if {![chan blocked $sock]} {
 				if {![dict exists $response statusline]} {
 					if {$line eq ""} {
-						# This is expressly forbidden in the HTTP RFC, but for some
-						# reason I'm getting these from the sugarcrm rest api
+						# RFC 7230 Section 3.5
 						continue
 					}
 					dict set response statusline $line
+					my _response_start $line
 					continue
 				}
 
@@ -712,6 +712,7 @@ oo::class create rl_http::async_io { #<<<
 	}
 
 	#>>>
+	method _response_start line {}	;# Hook this to get called when the status line is received
 	method _parse_statusline {} { #<<<
 		if {![regexp {^HTTP/([0-9]+\.[0-9]+) ([0-9][0-9][0-9]) (.*)$} [dict get $response statusline] - resp_http_ver http_code]} {
 			throw [list RL HTTP PARSE_HEADERS [dict get $response statusline]] "Invalid HTTP status line: \"[dict get $response statusline]\""
