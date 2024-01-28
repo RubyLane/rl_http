@@ -397,7 +397,6 @@ oo::class create rl_http::async_io { #<<<
 			throw [list RL URI ERROR] $errmsg
 		}
 
-		if {$u(scheme) eq "https"} {package require tls}
 		if {[string index $u(path) 0] ne "/"} {
 			set u(path)	/$u(path)
 		}
