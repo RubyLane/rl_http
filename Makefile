@@ -1,7 +1,7 @@
 DESTDIR=
 PREFIX=/usr/local
 PACKAGE_NAME=rl_http
-VER=1.15.1
+VER=1.16
 TCLSH=tclsh
 
 all: tm/$(PACKAGE_NAME)-$(VER).tm

@@ -120,6 +120,26 @@ namespace eval ::rl_http {
 
 		#>>>
 	}
+
+	variable _force_vwait	0
+	proc force_vwait_io script { #<<<
+		variable _force_vwait
+		incr _force_vwait
+		try {
+			uplevel 1 $script
+		} on break {r o} - on continue {r o} {
+			dict incr o -level 1
+			return -options $o $r
+		} on return {r o} {
+			dict incr o -level 1
+			dict set o -code return
+			return -options $o $r
+		} finally {
+			incr _force_vwait -1
+		}
+	}
+
+	#>>>
 }
 
 # Start the keepalive timeout handler thread <<<
@@ -202,6 +222,7 @@ oo::class create rl_http::async_io { #<<<
 
 	#>>>
 	method _connect_async {chanscript seconds} { # Connect to $ip:$port, with timeout support (-async + wait for writable event) <<<
+		variable ::rl_http::_force_vwait
 		my variable _timeout_connect_seq
 		my variable _timeout_connect_res
 
@@ -209,7 +230,7 @@ oo::class create rl_http::async_io { #<<<
 
 		set timeout_afterid	""
 		try {
-			if {[info coroutine] ne ""} {
+			if {[info coroutine] ne "" && $_force_vwait == 0} {
 				set ev_prefix	[list [info coroutine]]
 				set wait_cmd	{set _timeout_connect_res($my_seq)	[yield]}
 			} else {
@@ -251,6 +272,7 @@ oo::class create rl_http::async_io { #<<<
 
 	#>>>
 	method _wait_for_readable {chan seconds} { #<<<
+		variable ::rl_http::_force_vwait
 		my variable _wait_for_readable_seq
 		my variable _wait_for_readable_res
 
@@ -258,7 +280,7 @@ oo::class create rl_http::async_io { #<<<
 
 		set timeout_afterid	""
 		try {
-			if {[info coroutine] ne ""} {
+			if {[info coroutine] ne "" && $_force_vwait == 0} {
 				set ev_prefix	[list [info coroutine]]
 				set wait_cmd	{set _wait_for_readable_res($my_seq)	[yield]}
 			} else {
