@@ -60,14 +60,14 @@ test rl_http-1.1 {Basic usage, GET, http://} -body { #<<<
 	list [h code] [md5::md5 -hex [h body]]
 } -cleanup {
 	if {[info object isa object h]} {h destroy}
-} -result {200 E9EE03953F2D261E6329D921D7DDA0A3}
+} -result {200 BD076D578BFE58AD406803AAAAD7AD9B}
 #>>>
 test rl_http-1.2 {Basic usage, GET, https://} -body { #<<<
 	rl_http create h GET https://image0-rubylane.s3.amazonaws.com/0/cart/introbg.gif -timeout 5
 	list [h code] [md5::md5 -hex [h body]]
 } -cleanup {
 	if {[info object isa object h]} {h destroy}
-} -result {200 E9EE03953F2D261E6329D921D7DDA0A3}
+} -result {200 BD076D578BFE58AD406803AAAAD7AD9B}
 #>>>
 test rl_http-2.1 {local sockets, reuri} -setup { #<<<
 	if {[info exists ::rl_http::have_reuri]} {set old_have_reuri $::rl_http::have_reuri} else {unset -nocomplain old_have_reuri}

@@ -1,0 +1,217 @@
+package require Tcl 8.6
+
+if {"::tcltest" ni [namespace children]} {
+	package require tcltest
+	namespace import ::tcltest::*
+}
+
+set here	[file dirname [file normalize [info script]]]
+source [file join $here common.tcl]
+package require gc_class
+
+if 0 {
+gc_class create uds_ka_server {
+	variable {*}{
+		tid
+	}
+
+	constructor testname { #<<<
+		package require thread
+		if {[self next] ne ""} next
+
+		set tid	[thread::create -preserved]
+		thread::send $tid [string map [list \
+			%testname%	[list $testname] \
+		] {
+			package require unix_sockets
+			set sockname	/tmp/rl_http_%testname%-[pid].sock
+
+			set conuse	{}
+			set sockseq	0
+			set sockidx	{}
+			set socks	{}
+			proc readable sock {
+				global socks sockidx conuse
+				while 1 {
+					set line	[read $sock]
+					if {[eof $sock]} {
+						dict unset $socks $sock
+						close $sock
+						return
+					}
+					if {$line eq ""} break
+				}
+
+				puts -nonewline $sock "HTTP/1.1 200 Ok\nContent-Length: 2\nContent-Type: text/plain\nServer: Test\nDate: [clock format [clock seconds] -format "%a, %d %b %Y %T GMT" -timezone :UTC]\n\nok"
+				flush $sock
+				dict incr conuse [dict get $sockidx $sock] 1
+			}
+
+			set listen	[unix_sockets::listen $sockname [list apply {{sock args} {
+				global socks sockseq sockidx
+				dict set socks $sock 1
+				dict set sockidx $sock [incr sockseq]
+				chan configure $sock -blocking 0 -translation binary -buffering line
+				chan event $sock readable [list readable $sock]
+			}}]]
+
+			proc cleanup {} {
+				global sockname listen socks
+				if {[info exists listen] && $listen in [chan names]} {
+					close $listen
+				}
+				file delete $sockname
+				foreach sock [dict keys $socks] {
+					close $sock
+				}
+			}
+		}]
+	}
+
+	#>>>
+	destructor { #<<<
+		if {[info exists tid]} {
+			thread::send $tid cleanup
+			thread::release $tid
+			unset tid
+		}
+		if {[self next] ne ""} next
+	}
+
+	#>>>
+	method sockname {} { thread::send $tid {set sockname} }
+	method conuse {} { thread::send $tid {set conuse} }
+}
+}
+
+gc_class create lo_ka_server {
+	variable {*}{
+		tid
+	}
+
+	constructor {} { #<<<
+		package require thread
+		if {[self next] ne ""} next
+
+		set tid	[thread::create -preserved]
+		thread::send $tid {
+			set conuse	{}
+			set sockseq	0
+			set sockidx	{}
+			set socks	{}
+			proc readable sock {
+				global socks sockidx conuse
+				while 1 {
+					set line	[read $sock]
+					if {[eof $sock]} {
+						dict unset $socks $sock
+						close $sock
+						return
+					}
+					if {$line eq ""} break
+				}
+
+				puts -nonewline $sock "HTTP/1.1 200 Ok\nContent-Length: 2\nContent-Type: text/plain\nServer: Test\nDate: [clock format [clock seconds] -format "%a, %d %b %Y %T GMT" -timezone :UTC]\n\nok"
+				flush $sock
+				dict incr conuse [dict get $sockidx $sock] 1
+			}
+
+			set listen	[socket -myaddr 127.0.0.1 -server [list apply {{sock args} {
+				global socks sockseq sockidx
+				dict set socks $sock 1
+				dict set sockidx $sock [incr sockseq]
+				chan configure $sock -blocking 0 -translation binary -buffering line
+				chan event $sock readable [list readable $sock]
+			}}] 0]
+			set port	[lindex [chan configure $listen -sockname] 2]
+
+			proc cleanup {} {
+				global listen socks
+				if {[info exists listen] && $listen in [chan names]} {
+					close $listen
+				}
+				foreach sock [dict keys $socks] {
+					close $sock
+				}
+			}
+		}
+	}
+
+	#>>>
+	destructor { #<<<
+		if {[info exists tid]} {
+			thread::send $tid cleanup
+			thread::release $tid
+			unset tid
+		}
+		if {[self next] ne ""} next
+	}
+
+	#>>>
+	method port {} { thread::send $tid {set port} }
+	method conuse {} { thread::send $tid {set conuse} }
+}
+
+test keepalive_limits_count-1.1 {Default, no limit} -setup { #<<<
+	lo_ka_server instvar s
+	set url	http://127.0.0.1:[$s port]
+} -body {
+	for {set i 0} {$i < 100} {incr i} {
+		rl_http instvar h GET $url
+		$h code
+	}
+	$s conuse
+} -cleanup {
+	unset -nocomplain i h s url
+} -result {1 100}
+#>>>
+test keepalive_limits_count-2.1 {Default, count limit} -setup { #<<<
+	lo_ka_server instvar s
+	set url	http://127.0.0.1:[$s port]
+} -body {
+	for {set i 0} {$i < 125} {incr i} {
+		rl_http instvar h GET $url -max_keepalive_count 50
+		$h code
+	}
+	$s conuse
+} -cleanup {
+	unset -nocomplain i h s url
+} -result {1 50 2 50 3 25}
+#>>>
+test keepalive_limits_count-3.1 {Default, explicit negative count limit} -setup { #<<<
+	lo_ka_server instvar s
+	set url	http://127.0.0.1:[$s port]
+} -body {
+	for {set i 0} {$i < 125} {incr i} {
+		rl_http instvar h GET $url -max_keepalive_count -42
+		$h code
+	}
+	$s conuse
+} -cleanup {
+	unset -nocomplain i h s url
+} -result {1 125}
+#>>>
+test keepalive_limits_age-1.2 {Default, age limit} -setup { #<<<
+	lo_ka_server instvar s
+	set url	http://127.0.0.1:[$s port]
+} -body {
+	set start	[expr {[clock microseconds]/1e6}]
+	for {set i 0} {$i < 10} {incr i} {
+		rl_http instvar h GET $url -max_keepalive_age 0.1
+		$h code
+	}
+	while {[clock microseconds]/1e6 - $start < 0.11} {after 1}
+	for {set i 0} {$i < 10} {incr i} {
+		rl_http instvar h GET $url -max_keepalive_age 0.1
+		$h code
+	}
+	$s conuse
+} -cleanup {
+	unset -nocomplain i h s url start
+} -result {1 10 2 10}
+#>>>
+
+::tcltest::cleanupTests
+return
+
+# vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4

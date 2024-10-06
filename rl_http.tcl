@@ -167,12 +167,12 @@ tsv::lock rl_http_threads {
 			while 1 {
 				after 5000
 
-				set now			[clock seconds]
+				set now			[expr {[clock microseconds]/1e6}]
 				set to_close	{}
 				tsv::lock rl_http_keepalive_chans {
 					foreach {key parked_chans} [tsv::array get rl_http_keepalive_chans] {
 						set pruned	[lmap chaninfo $parked_chans {
-							lassign $chaninfo chan expires
+							lassign $chaninfo chan expires prev_uses first_use
 							if {$now > $expires} {
 								lappend to_close	$key $chan
 								continue
@@ -344,6 +344,8 @@ oo::class create rl_http::async_io { #<<<
 		keepalive
 		collected
 		async_gap_start
+		prev_uses
+		first_use
 	}
 
 	constructor {a_method a_url args} { #<<<
@@ -369,6 +371,8 @@ oo::class create rl_http::async_io { #<<<
             -stats_cx		{-default ""}
 			-async			{-boolean -# {If set, don't wait for the response (get it with [$obj collect] later)}}
 			-keepalive		{-default 1 -# {Not used}}
+			-max_keepalive_age		{-default -1 -# {keep a connection for at most this many seconds. <0 = no limit}}
+			-max_keepalive_count	{-default -1 -# {keep a connection for at most this many requests. <0 = no limit}}
 		} settings
 
 		set resp_headers_buf	""
@@ -496,29 +500,42 @@ oo::class create rl_http::async_io { #<<<
 				if {![tsv::exists rl_http_keepalive_chans $key]} {
 					return {}
 				}
-				set chan	[tsv::lpop rl_http_keepalive_chans $key]
-				if {$chan eq ""} {
+				set chaninfo	[tsv::lpop rl_http_keepalive_chans $key]
+				if {$chaninfo eq ""} {
 					tsv::unset rl_http_keepalive_chans $key
 				}
-				set chan
+				set chaninfo
 			}
 		}}
 		#>>>
 		#::rl_http::log debug "Looking for parked connection $key: [tsv::array get rl_http_keepalive_chans]"
 		while {[set chaninfo [apply $popchan $key]] ne ""} {
-			lassign $chaninfo chan expiry
+			lassign $chaninfo chan expiry prev_uses first_use
 			#::rl_http::log debug "[self] reusing $chan for $scheme://$host:$port"
 			try {
 				thread::attach $chan
-				# Check if the remote closed on us <<<
-				chan configure $chan -blocking 0
-				chan read $chan
-				if {[chan eof $chan]} {
-					::rl_http::log notice "parked chan collapsed: $chan for $key (remain: [tsv::get rl_http_keepalive_chans $key])"
+				set age	[expr {[clock microseconds]/1e6 - $first_use}]
+				if {
+					[set max_age [dict get $settings max_keepalive_age]] >= 0 &&
+					$age > $max_age
+				} {
+					#::rl_http::log notice "parked chan too old: $chan for $key (remain: [tsv::get rl_http_keepalive_chans $key])"
+					::rl_http::log notice "parked chan too old: $chan for $key"
 					chan close $chan
 					continue
+				} else {
+					# Check if the remote closed on us or is too old <<<
+					chan configure $chan -blocking 0
+					chan read $chan
+					if {[chan eof $chan]} {
+						#::rl_http::log notice "parked chan collapsed: $chan for $key (remain: [tsv::get rl_http_keepalive_chans $key])"
+						::rl_http::log notice "parked chan collapsed: $chan for $key"
+						chan close $chan
+						continue
+					}
+					# Check if the remote closed on us >>>
 				}
-				# Check if the remote closed on us >>>
+				#puts stderr "Reusing keepalive chan $chan, age: $age, first_use: $first_use"
 			} on ok {} {
 				if {[dict get $settings tapchan] ne ""} {
 					chan push $chan [dict get $settings tapchan]
@@ -551,7 +568,7 @@ oo::class create rl_http::async_io { #<<<
 				} {
 					resolve::resolver instvar resolve
 					#::rl_http::log notice "[self] resolving $host"
-					set now	[clock microseconds]
+					#set now	[clock microseconds]
 					$resolve add $host
 					set addrs	[$resolve get $host -timeout [my _remaining_timeout]]
 					#::rl_http::log notice "[self] Got result for $host in [format %.3f [expr {([clock microseconds]-$now)/1e3}]] ms"
@@ -613,6 +630,8 @@ oo::class create rl_http::async_io { #<<<
 		if {[dict get $settings tapchan] ne ""} {
 			chan push $chan [dict get $settings tapchan]
 		}
+		set prev_uses	0
+		set first_use	[expr {[clock microseconds] / 1e6}]
 		set chan
 	}
 
@@ -643,8 +662,37 @@ oo::class create rl_http::async_io { #<<<
 			if {[dict get $settings tapchan] ne ""} {
 				chan pop $chan
 			}
+
+			# Apply -max_keepalive_* limits if set
+			set now		[expr {[clock microseconds] / 1e6}]
+			set age		[expr {$now - $first_use}]
+			set uses	[expr {$prev_uses + 1}]
+			if {
+				(
+					[set max_age	[dict get $settings max_keepalive_age]] >= 0 &&
+					$age >= $max_age
+				) || (
+					[set max_uses	[dict get $settings max_keepalive_count]] >= 0 &&
+					$uses >= $max_uses
+				)
+			} {
+				close $chan
+				return
+			}
+
+			set expires	[expr {
+				$max_age >= 0
+					? $first_use + $max_age
+					: $now + $timeout
+			}]
+
 			thread::detach $chan
-			tsv::lpush rl_http_keepalive_chans $scheme://$host:$port [list $chan [expr {[clock seconds] + $timeout}]]
+			tsv::lpush rl_http_keepalive_chans $scheme://$host:$port [list \
+				$chan \
+				$expires \
+				$uses \
+				$first_use \
+			]
 		}
 	}
 

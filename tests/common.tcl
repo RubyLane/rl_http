@@ -183,6 +183,10 @@ proc replay_tap tap_dump { #<<<
 }
 
 #>>>
+
+trace add execution test enter {apply {{cmd args} {set ::testname [lindex $cmd 1]}}}
+trace add execution test leave {apply {{cmd args} {unset -nocomplain ::testname}}}
+
 } on error {errmsg options} {
    puts stderr "Error loading common.tcl: [dict get $options -errorinfo]"
 }

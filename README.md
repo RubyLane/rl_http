@@ -36,6 +36,8 @@ rl\_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 | -override\_host | | If set, use the supplied value as the request Host header, otherwise default to the authority section of the supplied url |
 | -tapchan | | If set, a stacked channel will be layered on top of the socket, with the -tapchan value used as the command prefix for the reflected channel handler.  An example handler is provided as ::rl\_http::tapchan, which logs the read and write events and the base64 encoded bytes on the wire, for debugging.  Redefine ::rl\_http::log to suit your environment (default writes to stderr) |
 | -useragent | Ruby Lane HTTP client | The value to send as the User-Agent header in the request |
+| -max\_keepalive\_age | -1 | If >= 0, the maximum age of a keepalive connection |
+| -max\_keepalive\_count | -1 | If >=0, the maximum number of requests on a keepalive connection |
 
 ### Instance Methods
 | Method | Arguments | Description |
