@@ -373,6 +373,7 @@ oo::class create rl_http::async_io { #<<<
 			-keepalive		{-default 1 -# {Not used}}
 			-max_keepalive_age		{-default -1 -# {keep a connection for at most this many seconds. <0 = no limit}}
 			-max_keepalive_count	{-default -1 -# {keep a connection for at most this many requests. <0 = no limit}}
+			-keepalive_check		{-default {h {return true}} -# {lambda - return true if the connection should be reused for future requests}}
 		} settings
 
 		set resp_headers_buf	""
@@ -462,6 +463,8 @@ oo::class create rl_http::async_io { #<<<
 
 		my _cancel_timeout
 
+		set collected	true
+
 		if {$sock in [chan names]} {
 			if {[dict exists $response headers connection] && "close" in [dict get $response headers connection]} {
 				close $sock
@@ -475,7 +478,6 @@ oo::class create rl_http::async_io { #<<<
 			unset sock
 		}
 
-		set collected	true
 		return
 	}
 
@@ -674,7 +676,8 @@ oo::class create rl_http::async_io { #<<<
 				) || (
 					[set max_uses	[dict get $settings max_keepalive_count]] >= 0 &&
 					$uses >= $max_uses
-				)
+				) ||
+				![apply [dict get $settings keepalive_check] [self]]
 			} {
 				close $chan
 				return

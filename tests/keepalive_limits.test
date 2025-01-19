@@ -89,11 +89,17 @@ gc_class create lo_ka_server {
 		tid
 	}
 
-	constructor {} { #<<<
+	constructor args { #<<<
+		package require parse_args
+		parse_args::parse_args $args {
+			-response_code_i	{-default {i {return 200}}}
+		}
+
 		package require thread
 		if {[self next] ne ""} next
 
 		set tid	[thread::create -preserved]
+		thread::send $tid [list set ::response_code_i	$response_code_i]
 		thread::send $tid {
 			set conuse	{}
 			set sockseq	0
@@ -111,7 +117,8 @@ gc_class create lo_ka_server {
 					if {$line eq ""} break
 				}
 
-				puts -nonewline $sock "HTTP/1.1 200 Ok\nContent-Length: 2\nContent-Type: text/plain\nServer: Test\nDate: [clock format [clock seconds] -format "%a, %d %b %Y %T GMT" -timezone :UTC]\n\nok"
+				set code	[apply $::response_code_i [expr {1+[dict getdef $conuse [dict get $sockidx $sock] 0]}]]
+				puts -nonewline $sock "HTTP/1.1 $code Ok\nContent-Length: 2\nContent-Type: text/plain\nServer: Test\nDate: [clock format [clock seconds] -format "%a, %d %b %Y %T GMT" -timezone :UTC]\n\nok"
 				flush $sock
 				dict incr conuse [dict get $sockidx $sock] 1
 			}
@@ -191,6 +198,7 @@ test keepalive_limits_count-3.1 {Default, explicit negative count limit} -setup 
 	unset -nocomplain i h s url
 } -result {1 125}
 #>>>
+
 test keepalive_limits_age-1.2 {Default, age limit} -setup { #<<<
 	lo_ka_server instvar s
 	set url	http://127.0.0.1:[$s port]
@@ -209,6 +217,22 @@ test keepalive_limits_age-1.2 {Default, age limit} -setup { #<<<
 } -cleanup {
 	unset -nocomplain i h s url start
 } -result {1 10 2 10}
+#>>>
+
+test keepalive_check-1.1 {Don't reuse connections after 500 response} -setup { #<<<
+	lo_ka_server instvar s -response_code_i {i {expr {$i == 50 ? 500 : 200}}}
+	set url	http://127.0.0.1:[$s port]
+} -body {
+	for {set i 0} {$i < 125} {incr i} {
+		rl_http instvar h GET $url -keepalive_check {h {
+			expr {[$h code] != 500}
+		}}
+		$h code
+	}
+	$s conuse
+} -cleanup {
+	unset -nocomplain i h s url
+} -result {1 50 2 50 3 25}
 #>>>
 
 ::tcltest::cleanupTests
