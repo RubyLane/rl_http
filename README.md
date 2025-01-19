@@ -38,6 +38,7 @@ rl\_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 | -useragent | Ruby Lane HTTP client | The value to send as the User-Agent header in the request |
 | -max\_keepalive\_age | -1 | If >= 0, the maximum age of a keepalive connection |
 | -max\_keepalive\_count | -1 | If >=0, the maximum number of requests on a keepalive connection |
+| -keepalive\_check | h {return true} | A lambda that can opt to close a connection rather than parking it for potential future reuse.  The *h* argument is the rl\_http instance, so things like the HTTP status or response headers can be interrogated |
 
 ### Instance Methods
 | Method | Arguments | Description |
