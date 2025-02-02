@@ -110,11 +110,11 @@ rl_http instvar h PUT $url -headers {Content-Type image/jpeg} -data $image_bytes
 
 Required Packages
 -----------------
-* gc\_class - https://github.com/RubyLane/gc\_class
+* gc\_class - https://github.com/RubyLane/gc_class
 * reuri - https://github.com/cyanogilvie/reuri, or uri from Tcllib (required if reuri is not available)
 * s2n, tls or twapi - for HTTPS support (optional).  https://github.com/cyanogilvie/tcl-s2n
 * sockopt - https://github.com/cyanogilvie/sockopt - sets TCP\_NODELAY (optional)
-* unix\_sockets - https://github.com/cyanogilvie/unix\_sockets - adds support for HTTP-over-UDS (optional)
+* unix\_sockets - https://github.com/cyanogilvie/unix_sockets - adds support for HTTP-over-UDS (optional)
 * resolve - https://github.com/cyanogilvie/resolve - adds support for async name resolution and caching (optional)
 
 License
