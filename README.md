@@ -53,7 +53,7 @@ Usage
 rl\_http uses gc\_class, so instance management is best left to bound instance variables:
 
 ~~~tcl
-rl\_http instvar h GET https://raw.githubusercontent.com/RubyLane/rl\_http/master/README.md
+rl_http instvar h GET https://raw.githubusercontent.com/RubyLane/rl_http/master/README.md
 switch -glob -- [$h code] {
     2* {
         puts "Got result:\n[$h body]"
@@ -67,7 +67,7 @@ switch -glob -- [$h code] {
 ~~~
 
 When $h is unset (usually because it went out of scope), or its value is
-changed, the instance of rl\_http will be destroyed.
+changed, the instance of rl_http will be destroyed.
 
 ### Headers
 
@@ -77,20 +77,20 @@ Response headers (returned by the *headers* method) are represented as a diction
 
 Request body data supplied in the *-data* option must be fully encoded, matching the Content-Type request header.  For text types this usually means utf-8, for images it should be the raw bytes of the image.
 ~~~tcl
-set json\_body {
+set json_body {
     {
         "hello": "server",
         "foo": 1234
     }
 }
 # utf-8 is the default for application/json, could also be explicit: "application/json; charset=utf-8"
-rl\_http instvar h PUT $url -headers {Content-Type application/json} -data [encoding convertto utf-8 $json\_body]
+rl_http instvar h PUT $url -headers {Content-Type application/json} -data [encoding convertto utf-8 $json_body]
 ~~~
 
 ~~~tcl
 set h	[open avatar.jpg rb]
-try {set image\_bytes [read $h]} finally {close $h}
-rl\_http instvar h PUT $url -headers {Content-Type image/jpeg} -data $image\_bytes
+try {set image_bytes [read $h]} finally {close $h}
+rl_http instvar h PUT $url -headers {Content-Type image/jpeg} -data $image_bytes
 ~~~
 
 ### Exceptions
@@ -111,12 +111,11 @@ rl\_http instvar h PUT $url -headers {Content-Type image/jpeg} -data $image\_byt
 Required Packages
 -----------------
 * gc\_class - https://github.com/RubyLane/gc\_class
-* uri - from Tcllib (required if reuri is not available)
-* tls or twapi - for HTTPS support (optional)
+* reuri - https://github.com/cyanogilvie/reuri, or uri from Tcllib (required if reuri is not available)
+* s2n, tls or twapi - for HTTPS support (optional).  https://github.com/cyanogilvie/tcl-s2n
 * sockopt - https://github.com/cyanogilvie/sockopt - sets TCP\_NODELAY (optional)
 * unix\_sockets - https://github.com/cyanogilvie/unix\_sockets - adds support for HTTP-over-UDS (optional)
 * resolve - https://github.com/cyanogilvie/resolve - adds support for async name resolution and caching (optional)
-* reuri - https://github.com/cyanogilvie/reuri - faster URI parsing (optional)
 
 License
 -------
