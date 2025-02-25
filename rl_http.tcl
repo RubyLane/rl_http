@@ -556,7 +556,7 @@ oo::class create rl_http::async_io { #<<<
 				http  {set chan	[my _connect_async {unix_sockets::connect $host} [my _remaining_timeout]]}
 				https {
 					set chan	[my _connect_async {unix_sockets::connect $host} [my _remaining_timeout]]
-					my push_tls $chan {}
+					my push_tls $chan [dict getdef $settings override_host {}]
 				}
 				default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
 			}
@@ -600,7 +600,7 @@ oo::class create rl_http::async_io { #<<<
 						https {
 							set chan [my _connect_async {socket -async $chost $cport}     [my _remaining_timeout]]
 							#set before	[clock microseconds]
-							my push_tls $chan $host
+							my push_tls $chan [dict getdef $settings override_host $host]
 							#set chan	[s2n::socket -prefer throughput -servername $host $chost $cport]
 							#::rl_http::log debug "push_tls on connected socket: [format %.3f [expr {([clock microseconds] - $before)/1e3}]] ms"
 						}
