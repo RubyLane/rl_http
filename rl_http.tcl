@@ -375,6 +375,7 @@ oo::class create rl_http::async_io { #<<<
 			-max_keepalive_count	{-default -1 -# {keep a connection for at most this many requests. <0 = no limit}}
 			-keepalive_check		{-default {h {return true}} -# {lambda - return true if the connection should be reused for future requests}}
 		} settings
+		if {[dict get $settings override_host] eq ""} {dict unset settings override_host}
 
 		set resp_headers_buf	""
 		set resp_body_buf		""
@@ -722,7 +723,7 @@ oo::class create rl_http::async_io { #<<<
 		}
 
 		if {"host" ni $have_headers} {
-			if {[dict get $settings override_host] ne ""} {
+			if {[dict exists $settings override_host]} {
 				puts $sock "Host: [apply $encode_host [dict get $settings override_host]]"
 			} else {
 				if {$u(port) eq "<unix>"} {
