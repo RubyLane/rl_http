@@ -1,4 +1,4 @@
-package require Tcl 8.6
+package require Tcl 8.6-
 package require gc_class
 package require Thread
 package require parse_args
