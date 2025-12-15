@@ -12,7 +12,9 @@ tm/$(PACKAGE_NAME)-$(VER).tm: rl_http.tcl
 
 install-tm: tm/$(PACKAGE_NAME)-$(VER).tm
 	mkdir -p $(DESTDIR)$(PREFIX)/lib/tcl8/site-tcl
+	mkdir -p $(DESTDIR)$(PREFIX)/lib/tcl9/site-tcl
 	cp $< $(DESTDIR)$(PREFIX)/lib/tcl8/site-tcl/
+	cp $< $(DESTDIR)$(PREFIX)/lib/tcl9/site-tcl/
 
 install: install-tm
 
