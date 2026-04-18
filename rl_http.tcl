@@ -708,7 +708,7 @@ oo::class create rl_http::async_io { #<<<
 			-blocking 0 \
 			-buffering full \
 			-buffersize 65536 \
-			-encoding ascii
+			-encoding iso8859-1
 	}
 
 	#>>>
@@ -754,12 +754,12 @@ oo::class create rl_http::async_io { #<<<
 			chan configure $sock -buffersize 1000000
 			chan configure $sock -translation {auto binary}
 			puts -nonewline $sock [dict get $settings data]
-			chan configure $sock -translation {auto crlf} -encoding ascii
+			chan configure $sock -translation {auto crlf} -encoding iso8859-1
 		} elseif {[dict get $settings data_cb] ne ""} {
 			chan configure $sock -buffersize 1000000
 			chan configure $sock -translation {auto binary}
 			uplevel #0 [list {*}[dict get $settings data_cb] $sock]
-			chan configure $sock -translation {auto crlf} -encoding ascii
+			chan configure $sock -translation {auto crlf} -encoding iso8859-1
 		}
 		flush $sock
 	}
@@ -776,7 +776,7 @@ oo::class create rl_http::async_io { #<<<
 
 	#>>>
 	method _read_headers {} { #<<<
-		chan configure $sock -buffering line -translation {auto crlf} -encoding ascii
+		chan configure $sock -buffering line -translation {auto crlf} -encoding iso8859-1
 		while 1 {
 			#set before	[clock microseconds]
 			set line	[gets $sock]
@@ -883,7 +883,7 @@ oo::class create rl_http::async_io { #<<<
 
 	#>>>
 	method _read_chunk_control {} { #<<<
-		chan configure $sock -translation {auto crlf} -encoding ascii -buffering line
+		chan configure $sock -translation {auto crlf} -encoding iso8859-1 -buffering line
 
 		while 1 {
 			set chunk_buf	[gets $sock]
@@ -1058,9 +1058,9 @@ oo::class create rl_http::async_io { #<<<
 				}
 
 				switch -nocase -- $charset {
-					utf-8        { set resp_body_buf [encoding convertfrom utf-8     $resp_body_buf] }
-					iso-8859-1   { set resp_body_buf [encoding convertfrom iso8859-1 $resp_body_buf] }
-					windows-1252 { set resp_body_buf [encoding convertfrom cp1252    $resp_body_buf] }
+					utf-8        { set resp_body_buf [encoding convertfrom -profile replace utf-8     $resp_body_buf] }
+					iso-8859-1   { set resp_body_buf [encoding convertfrom -profile replace iso8859-1 $resp_body_buf] }
+					windows-1252 { set resp_body_buf [encoding convertfrom -profile replace cp1252    $resp_body_buf] }
 					identity     {}
 					default {
 						# Only broken servers will land here - we specified the set of encodings we support in the
