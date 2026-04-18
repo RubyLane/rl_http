@@ -357,20 +357,22 @@ oo::class create rl_http::async_io { #<<<
 		if {[self next] ne ""} next
 
 		parse_args $args {
-			-timeout		{-default 15}
-			-ver			{-default 1.1}
-			-accept			{-default */*}
-			-headers		{-default {}}
-			-sizelimit		{-default ""}
-			-data			{-default ""}
-			-data_cb		{-default {}}
-			-data_len		{-default ""}
-			-override_host	{-default ""}
-			-tapchan		{-default ""}
-			-useragent		{-default "Ruby Lane HTTP client"}
-            -stats_cx		{-default ""}
-			-async			{-boolean -# {If set, don't wait for the response (get it with [$obj collect] later)}}
-			-keepalive		{-default 1 -# {Not used}}
+			-timeout			{-default 15 -# {Overall request budget in seconds. Caps total wall-clock time from the start of the request to completion. Empty string disables. Primary purpose: bound worst-case thread occupancy when a remote endpoint gets wedged.}}
+			-connect_timeout	{-default {} -# {Optional ceiling (seconds) on the DNS/TCP/TLS handshake phase. Never exceeds -timeout's remaining budget. Empty = use only -timeout. Typical SDKs: 2-10s.}}
+			-read_timeout		{-default {} -# {Optional ceiling (seconds) on each inter-read wait — resets every time we wait for the next readable chunk, so effectively a "max gap between bytes" budget. Never exceeds -timeout's remaining budget. Empty = use only -timeout. Typical SDKs: 30-60s.}}
+			-ver				{-default 1.1}
+			-accept				{-default */*}
+			-headers			{-default {}}
+			-sizelimit			{-default ""}
+			-data				{-default ""}
+			-data_cb			{-default {}}
+			-data_len			{-default ""}
+			-override_host		{-default ""}
+			-tapchan			{-default ""}
+			-useragent			{-default "Ruby Lane HTTP client"}
+            -stats_cx			{-default ""}
+			-async				{-boolean -# {If set, don't wait for the response (get it with [$obj collect] later)}}
+			-keepalive			{-default 1 -# {Not used}}
 			-max_keepalive_age		{-default -1 -# {keep a connection for at most this many seconds. <0 = no limit}}
 			-max_keepalive_count	{-default -1 -# {keep a connection for at most this many requests. <0 = no limit}}
 			-keepalive_check		{-default {h {return true}} -# {lambda - return true if the connection should be reused for future requests}}
@@ -554,9 +556,9 @@ oo::class create rl_http::async_io { #<<<
 			# HTTP-over-unix-domain-sockets
 			package require unix_sockets
 			switch -- $scheme {
-				http  {set chan	[my _connect_async {unix_sockets::connect $host} [my _remaining_timeout]]}
+				http  {set chan	[my _connect_async {unix_sockets::connect $host} [my _effective_timeout [dict get $settings connect_timeout]]]}
 				https {
-					set chan	[my _connect_async {unix_sockets::connect $host} [my _remaining_timeout]]
+					set chan	[my _connect_async {unix_sockets::connect $host} [my _effective_timeout [dict get $settings connect_timeout]]]
 					my push_tls $chan [dict getdef $settings override_host {}]
 				}
 				default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
@@ -573,7 +575,7 @@ oo::class create rl_http::async_io { #<<<
 					#::rl_http::log notice "[self] resolving $host"
 					#set now	[clock microseconds]
 					$resolve add $host
-					set addrs	[$resolve get $host -timeout [my _remaining_timeout]]
+					set addrs	[$resolve get $host -timeout [my _effective_timeout [dict get $settings connect_timeout]]]
 					#::rl_http::log notice "[self] Got result for $host in [format %.3f [expr {([clock microseconds]-$now)/1e3}]] ms"
 					tsv::set _rl_http_resolve_cache $host [list addrs $addrs ts [clock seconds]]
 					# TODO: maybe have a background grooming thread go through this cache periodically and
@@ -597,9 +599,9 @@ oo::class create rl_http::async_io { #<<<
 				try {
 					#::rl_http::log debug "attempting to connect to $chost $port for $scheme://$host:$port"
 					switch -- $scheme {
-						http  {set chan	[my _connect_async {socket -async $chost $cport}  [my _remaining_timeout]]}
+						http  {set chan	[my _connect_async {socket -async $chost $cport}  [my _effective_timeout [dict get $settings connect_timeout]]]}
 						https {
-							set chan [my _connect_async {socket -async $chost $cport}     [my _remaining_timeout]]
+							set chan [my _connect_async {socket -async $chost $cport}     [my _effective_timeout [dict get $settings connect_timeout]]]
 							#set before	[clock microseconds]
 							my push_tls $chan [dict getdef $settings override_host $host]
 							#set chan	[s2n::socket -prefer throughput -servername $host $chost $cport]
@@ -775,6 +777,20 @@ oo::class create rl_http::async_io { #<<<
 	}
 
 	#>>>
+	method _effective_timeout {cap} { #<<<
+		# Smaller of: $cap (phase-specific ceiling, empty = none) and the
+		# overall -timeout's remaining budget (empty = none). Used at
+		# read/connect call sites so -read_timeout / -connect_timeout
+		# can only shorten, never extend, the overall budget. Returns
+		# empty (meaning "no timeout") only when both are empty.
+		set rem	[my _remaining_timeout]
+		if {$cap eq {} && $rem eq {}} {return {}}
+		if {$cap eq {}}                {return $rem}
+		if {$rem eq {}}                {return $cap}
+		expr {min($cap, $rem)}
+	}
+
+	#>>>
 	method _read_headers {} { #<<<
 		chan configure $sock -buffering line -translation {auto crlf} -encoding iso8859-1
 		while 1 {
@@ -804,7 +820,7 @@ oo::class create rl_http::async_io { #<<<
 
 				append resp_headers_buf $line \n
 			} else {
-				my _wait_for_readable $sock [my _remaining_timeout]
+				my _wait_for_readable $sock [my _effective_timeout [dict get $settings read_timeout]]
 			}
 		}
 
@@ -898,7 +914,7 @@ oo::class create rl_http::async_io { #<<<
 				break
 			}
 
-			my _wait_for_readable $sock [my _remaining_timeout]
+			my _wait_for_readable $sock [my _effective_timeout [dict get $settings read_timeout]]
 		}
 
 		if {$body_status ne "ok"} {
@@ -929,7 +945,7 @@ oo::class create rl_http::async_io { #<<<
 			unset -nocomplain wait
 			my _readable_body $expecting
 			if {[info exists wait]} break
-			my _wait_for_readable $sock [my _remaining_timeout]
+			my _wait_for_readable $sock [my _effective_timeout [dict get $settings read_timeout]]
 		}
 		set body_status	$wait
 
@@ -981,7 +997,7 @@ oo::class create rl_http::async_io { #<<<
 			while 1 {
 				my _readable_body $expecting
 				if {[info exists wait]} break
-				my _wait_for_readable $sock [my _remaining_timeout]
+				my _wait_for_readable $sock [my _effective_timeout [dict get $settings read_timeout]]
 			}
 			set body_status	$wait
 
