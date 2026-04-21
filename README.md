@@ -25,7 +25,9 @@ rl\_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 ### Options
 | Option | Default | Description |
 |--------|---------|-------------|
-| -timeout | 15.0 | Time in seconds after which to consider the request a timeout.  The timeout applies from the start of the connection attempt until the response is fully received.  Use a value of "" to disable |
+| -timeout | 15.0 | Overall request budget in seconds — caps total wall-clock time from the start of the request to completion.  The primary purpose is to bound worst-case thread occupancy when a remote endpoint wedges.  Use an empty string ("") to disable |
+| -connect\_timeout | | Optional ceiling (seconds) on the DNS/TCP/TLS handshake phase.  Never exceeds -timeout's remaining budget.  Empty = use only -timeout.  Typical SDKs: 2-10s |
+| -read\_timeout | | Optional ceiling (seconds) on each inter-read wait — resets every time we wait for the next readable chunk, so effectively a "max gap between bytes" budget.  Never exceeds -timeout's remaining budget.  Empty = use only -timeout.  Typical SDKs: 30-60s |
 | -ver | 1.1 | The HTTP version to declare in the request |
 | -accept | \*/\* | The Accept header to send with the request |
 | -headers | | The request headers to send, as a list similar to a dictionary but allowing duplicate keys: HTTP headers can be multivalued |
@@ -34,6 +36,9 @@ rl\_http instvar *varname* *METHOD* *url* ?*-option* *value* ...?
 | -data\_cb | | If set, the value is used as a command prefix to invoke to write the request body to the socket.  The socket channel is appended as the first argument.  The channel is in binary mode for writing |
 | -data\_len | | If -data\_cb is used, the -data\_len option can be used to supply a Content-Length header in the request |
 | -override\_host | | If set, use the supplied value as the request Host header, otherwise default to the authority section of the supplied url |
+| -cafile | | Path to a PEM bundle of trusted CAs for TLS verification.  Replaces the driver's default trust store (matches AWS CLI `AWS_CA_BUNDLE` semantics).  Empty = driver default |
+| -cadir | | Directory of hashed PEM certs (OpenSSL style).  Same replacement semantics as -cafile |
+| -s2n\_config | | Generic s2n config dict escape hatch, honored only when the s2n driver is active.  Keys are those documented in the s2n Tcl wrapper's get\_s2n\_config\_from\_obj — session\_tickets, ticket\_lifetime, cipher\_preferences, ca\_file, ca\_dir.  -cafile / -cadir win on conflict |
 | -tapchan | | If set, a stacked channel will be layered on top of the socket, with the -tapchan value used as the command prefix for the reflected channel handler.  An example handler is provided as ::rl\_http::tapchan, which logs the read and write events and the base64 encoded bytes on the wire, for debugging.  Redefine ::rl\_http::log to suit your environment (default writes to stderr) |
 | -useragent | Ruby Lane HTTP client | The value to send as the User-Agent header in the request |
 | -max\_keepalive\_age | -1 | If >= 0, the maximum age of a keepalive connection |

@@ -1,0 +1,139 @@
+package require Tcl 8.6-
+
+if {"::tcltest" ni [namespace children]} {
+	package require tcltest
+	namespace import ::tcltest::*
+}
+
+set here	[file dirname [file normalize [info script]]]
+source [file join $here common.tcl]
+
+tcltest::testConstraint have_reuri	[expr {![catch {package require reuri 0.15}]}]
+tcltest::testConstraint have_s2n	[expr {![catch {package require s2n}]}]
+
+# _keepalive_key is an internal method (underscore-prefixed, not exported by
+# default). Export it for whitebox tests below.
+oo::define rl_http {export _keepalive_key}
+
+# Ephemeral local HTTP server so constructor paths succeed — we only use the
+# resulting instance to inspect _keepalive_key's partition output.
+set ::_ca_listen [socket -myaddr 127.0.0.1 -server {apply {{chan args} {
+	chan configure $chan -translation {auto lf} -buffering full -blocking 0
+	chan event $chan readable [list apply {{chan} {
+		if {[chan eof $chan]} {close $chan; return}
+		set line [gets $chan]
+		if {[chan blocked $chan]} return
+		# Minimal response, close-on-done.
+		chan configure $chan -translation {auto crlf}
+		puts -nonewline $chan "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+		close $chan
+	}} $chan]
+}}} 0]
+set ::_ca_port [lindex [chan configure $::_ca_listen -sockname] 2]
+set ::_ca_url  http://127.0.0.1:$::_ca_port/
+
+proc _key_for_settings args { #<<<
+	global _ca_url
+	# Construct a real rl_http against the local server. Force scheme=https when
+	# calling _keepalive_key so the TLS partition branch is exercised even though
+	# the actual connection is http — _keepalive_key is pure over $settings plus
+	# the scheme/host/port we pass in.
+	catch {::_kk destroy}
+	try {
+		rl_http create ::_kk GET $_ca_url -timeout 5 {*}$args
+		::_kk _keepalive_key https example.com 443
+	} finally {
+		catch {::_kk destroy}
+	}
+}
+#>>>
+
+test ca_bundle-key-1.1 {no TLS opts → plain host:port} -constraints have_reuri -body { #<<<
+	_key_for_settings
+} -result {https://example.com:443}
+#>>>
+test ca_bundle-key-1.2 {http scheme short-circuits — no partition suffix} -constraints have_reuri -body { #<<<
+	rl_http create ::_kk2 GET $::_ca_url -timeout 5 -cafile /some/bundle.pem
+	set r [::_kk2 _keepalive_key http example.com 80]
+	::_kk2 destroy
+	set r
+} -result {http://example.com:80}
+#>>>
+test ca_bundle-key-2.1 {setting -cafile partitions the key} -constraints have_reuri -body { #<<<
+	set a [_key_for_settings]
+	set b [_key_for_settings -cafile /corp/bundle.pem]
+	expr {$a ne $b}
+} -result 1
+#>>>
+test ca_bundle-key-2.2 {different -cafile values → different keys} -constraints have_reuri -body { #<<<
+	set a [_key_for_settings -cafile /corp/bundle-a.pem]
+	set b [_key_for_settings -cafile /corp/bundle-b.pem]
+	expr {$a ne $b}
+} -result 1
+#>>>
+test ca_bundle-key-2.3 {same -cafile → same key} -constraints have_reuri -body { #<<<
+	set a [_key_for_settings -cafile /corp/bundle.pem]
+	set b [_key_for_settings -cafile /corp/bundle.pem]
+	expr {$a eq $b}
+} -result 1
+#>>>
+test ca_bundle-key-3.1 {dict key order in -s2n_config doesn't fragment pool} -constraints have_reuri -body { #<<<
+	set a [_key_for_settings -s2n_config {ca_file /corp/bundle.pem cipher_preferences default}]
+	set b [_key_for_settings -s2n_config {cipher_preferences default ca_file /corp/bundle.pem}]
+	expr {$a eq $b}
+} -result 1
+#>>>
+test ca_bundle-key-3.2 {-cafile shortcut wins over -s2n_config ca_file} -constraints have_reuri -body { #<<<
+	set a [_key_for_settings -cafile /win.pem -s2n_config {ca_file /lose.pem}]
+	set b [_key_for_settings -cafile /win.pem]
+	expr {$a eq $b}
+} -result 1
+#>>>
+test ca_bundle-key-4.1 {config-dict keys are s2n_-prefixed in the URL} -constraints have_reuri -body { #<<<
+	set k [_key_for_settings -cafile /corp/bundle.pem]
+	# Must contain s2n_ca_file=, must NOT contain a bare ca_file= (no prefix).
+	list [regexp {s2n_ca_file=} $k] [regexp {(?:^|[?&])ca_file=} $k]
+} -result {1 0}
+#>>>
+test ca_bundle-key-5.1 {-override_host that differs from host partitions key} -constraints have_reuri -body { #<<<
+	set a [_key_for_settings]
+	set b [_key_for_settings -override_host other.example.com]
+	expr {$a ne $b}
+} -result 1
+#>>>
+test ca_bundle-key-5.2 {-override_host that equals host doesn't add sni param} -constraints have_reuri -body { #<<<
+	set a [_key_for_settings]
+	set b [_key_for_settings -override_host example.com]
+	expr {$a eq $b}
+} -result 1
+#>>>
+
+# End-to-end negative: bogus -cafile → TLS handshake fails. Requires network
+# and the s2n driver (where the new plumbing is exercised).
+
+test ca_bundle-handshake-1.1 {empty -cafile bundle fails the TLS handshake} -constraints {have_reuri have_s2n} -body { #<<<
+	set empty_bundle /tmp/rl_http_test_empty_bundle-[pid].pem
+	set fh [open $empty_bundle w]; close $fh
+	try {
+		rl_http create ::_kk_h GET https://www.google.com/ -timeout 10 -cafile $empty_bundle
+	} finally {
+		file delete -force $empty_bundle
+		if {[info object isa object ::_kk_h]} {::_kk_h destroy}
+	}
+} -returnCodes error -match glob -result {*}
+#>>>
+test ca_bundle-handshake-1.2 {-cafile at system bundle succeeds} -constraints {have_reuri have_s2n} -body { #<<<
+	rl_http create ::_kk_h2 GET https://www.google.com/ -timeout 10 -cafile /etc/ssl/certs/ca-certificates.crt
+	set code [::_kk_h2 code]
+	::_kk_h2 destroy
+	expr {$code >= 200 && $code < 600}
+} -result 1
+#>>>
+
+close $::_ca_listen
+unset ::_ca_listen ::_ca_port ::_ca_url
+
+::tcltest::cleanupTests
+return
+
+# vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4

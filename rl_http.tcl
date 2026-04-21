@@ -368,6 +368,9 @@ oo::class create rl_http::async_io { #<<<
 			-data_cb			{-default {}}
 			-data_len			{-default ""}
 			-override_host		{-default ""}
+			-cafile				{-default "" -# {Path to a PEM bundle of trusted CAs for TLS verification. Empty = driver default. Honors AWS_CA_BUNDLE semantics (replaces system trust store, not additive).}}
+			-cadir				{-default "" -# {Directory of hashed PEM certs (OpenSSL style). Empty = driver default.}}
+			-s2n_config			{-default "" -# {Generic s2n config dict escape-hatch. Keys documented in s2n's get_s2n_config_from_obj. -cafile/-cadir are merged in as ca_file/ca_dir and win on conflict. Only honored when the s2n driver is active.}}
 			-tapchan			{-default ""}
 			-useragent			{-default "Ruby Lane HTTP client"}
             -stats_cx			{-default ""}
@@ -499,7 +502,7 @@ oo::class create rl_http::async_io { #<<<
 	#>>>
 	method _keepalive_connect {scheme host port} { #<<<
 		#::rl_http::log debug "[self] _keepalive_connect $scheme $host $port"
-		set key		$scheme://$host:$port
+		set key		[my _keepalive_key $scheme $host $port]
 		set popchan {key { # Retrieve the next idle keepalive channel for $key <<<
 			tsv::lock rl_http_keepalive_chans {
 				if {![tsv::exists rl_http_keepalive_chans $key]} {
@@ -559,7 +562,7 @@ oo::class create rl_http::async_io { #<<<
 				http  {set chan	[my _connect_async {unix_sockets::connect $host} [my _effective_timeout [dict get $settings connect_timeout]]]}
 				https {
 					set chan	[my _connect_async {unix_sockets::connect $host} [my _effective_timeout [dict get $settings connect_timeout]]]
-					my push_tls $chan [dict getdef $settings override_host {}]
+					my push_tls $chan [if {[dict exists $settings override_host]} {dict get $settings override_host}]
 				}
 				default {throw [list RL HTTP CONNECT UNSUPPORTED_SCHEME $scheme] "Scheme $scheme is not supported"}
 			}
@@ -603,7 +606,7 @@ oo::class create rl_http::async_io { #<<<
 						https {
 							set chan [my _connect_async {socket -async $chost $cport}     [my _effective_timeout [dict get $settings connect_timeout]]]
 							#set before	[clock microseconds]
-							my push_tls $chan [dict getdef $settings override_host $host]
+							my push_tls $chan [if {[dict exists $settings override_host]} {dict get $settings override_host} {set host}]
 							#set chan	[s2n::socket -prefer throughput -servername $host $chost $cport]
 							#::rl_http::log debug "push_tls on connected socket: [format %.3f [expr {([clock microseconds] - $before)/1e3}]] ms"
 						}
@@ -643,21 +646,66 @@ oo::class create rl_http::async_io { #<<<
 	#>>>
 	method push_tls {chan servername} { #<<<
 		variable ::rl_http::tls_driver
+		set cafile		[dict get $settings cafile]
+		set cadir		[dict get $settings cadir]
+		set s2n_config	[dict get $settings s2n_config]
+		if {$cafile ne ""} { dict set s2n_config ca_file $cafile }
+		if {$cadir  ne ""} { dict set s2n_config ca_dir  $cadir }
+
 		if {$::rl_http::tls_driver eq "s2n"} {
 			package require s2n
-			if {$servername eq ""} {
-				s2n::push $chan -prefer throughput
-			} else {
-				s2n::push $chan -servername $servername -prefer throughput
-			}
+			set opts							{-prefer throughput}
+			if {$servername ne ""}				{lappend opts -servername $servername}
+			if {[dict size $s2n_config] > 0}	{lappend opts -config $s2n_config}
+			s2n::push $chan {*}$opts
 		} else {
 			package require tls
-			if {$servername eq ""} {
-				tls::import $chan -require true -cadir /etc/ssl/certs
+			set opts	[list -require true]
+			if {$servername ne ""} {lappend opts -servername $servername}
+			if {$cafile ne "" || $cadir ne ""} {
+				if {$cafile ne ""} {lappend opts -cafile $cafile}
+				if {$cadir  ne ""} {lappend opts -cadir  $cadir}
 			} else {
-				tls::import $chan -servername $servername -require true -cadir /etc/ssl/certs
+				lappend opts -cadir /etc/ssl/certs
 			}
+			tls::import $chan {*}$opts
 		}
+	}
+
+	#>>>
+	method _keepalive_key {scheme host port} { #<<<
+		# Pool-key partition: parked TLS connections were validated against a
+		# specific trust configuration at handshake time. A caller asking for
+		# a different -cafile / SNI / s2n config must not be handed back a
+		# channel whose handshake doesn't match. http (no TLS) short-circuits.
+		set key	$scheme://$host:$port
+		if {$scheme ne "https"} {return $key}
+
+		set cafile			[dict get $settings cafile]
+		set cadir			[dict get $settings cadir]
+		set s2n_config		[dict get $settings s2n_config]
+		if {$cafile ne ""} {dict set s2n_config ca_file $cafile}
+		if {$cadir  ne ""} {dict set s2n_config ca_dir  $cadir}
+		set sni				[if {[dict exists $settings override_host]} {dict get $settings override_host}]
+		set sni_override	[expr {$sni ni [list {} $host]}]
+
+		if {[dict size $s2n_config] == 0 && !$sni_override} {
+			return $key
+		}
+
+		if {!$::rl_http::have_reuri} {
+			throw [list RL HTTP REURI_REQUIRED] "-cafile / -cadir / -s2n_config / non-default -override_host require reuri 0.15+"
+		}
+
+		# lsort so two callers passing the same dict in different orders
+		# partition to the same pool slot.
+		foreach {k v} [lsort -stride 2 -index 0 $s2n_config] {
+			reuri query add key s2n_$k $v
+		}
+		if {$sni_override} {
+			reuri query set key sni $sni
+		}
+		reuri normalize $key
 	}
 
 	#>>>
@@ -693,7 +741,7 @@ oo::class create rl_http::async_io { #<<<
 			}]
 
 			thread::detach $chan
-			tsv::lpush rl_http_keepalive_chans $scheme://$host:$port [list \
+			tsv::lpush rl_http_keepalive_chans [my _keepalive_key $scheme $host $port] [list \
 				$chan \
 				$expires \
 				$uses \
