@@ -1,0 +1,8 @@
+# pkg-config metadata for rl_http. See chantricks.pc.in for layout
+# rationale — both are pure-Tcl modules with no link-time exports.
+
+tcl_tm_path=${pcfiledir}/../tcl@TCL_MAJOR@/site-tcl
+
+Name: @PACKAGE_NAME@
+Description: HTTP client for Tcl, with keepalive pooling and adaptive TLS
+Version: @PACKAGE_VERSION@

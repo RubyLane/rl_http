@@ -5,7 +5,8 @@ if {"::tcltest" ni [namespace children]} {
 	namespace import ::tcltest::*
 }
 
-source tests/common.tcl
+set here [file dirname [file normalize [info script]]]
+source [file join $here common.tcl]
 
 test tapchan-1.1 {Inspect bytes on the wire with -tapchan} -setup { #<<<
 	package require aio
