@@ -1,5 +1,5 @@
 project('rl_http',
-  version:            '1.25',
+  version:            '1.26',
   meson_version:      '>=1.3.0',
 )
 # Pure-Tcl module: rl_http is a single .tcl file distributed as a Tcl
@@ -19,9 +19,9 @@ rl_http_tm = configure_file(
   input:          'rl_http.tcl',
   output:         master_tm_name,
   copy:           true,
-  install:        not meson.is_subproject(),
+  install:        true,
   install_dir:    tm_install_dir,
-  install_tag:    'runtime',
+  install_tag:    meson.is_subproject() ? 'deps' : 'runtime',
 )
 
 # pkg-config file with `tcl_tm_path` variable. See chantricks for the
@@ -35,8 +35,9 @@ configure_file(
   input:          meson.project_name() + '.pc.in',
   output:         meson.project_name() + '.pc',
   configuration:  pc_conf,
-  install:        not meson.is_subproject(),
+  install:        true,
   install_dir:    tcl_dep.get_variable('libdir') / 'pkgconfig',
+  install_tag:    meson.is_subproject() ? 'deps' : 'runtime',
 )
 
 rl_http_dep = declare_dependency(
