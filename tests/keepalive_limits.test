@@ -219,6 +219,33 @@ test keepalive_limits_age-1.2 {Default, age limit} -setup { #<<<
 } -result {1 10 2 10}
 #>>>
 
+test keepalive_limits_expiry-1.1 {Don't reuse an expired parked connection that the grooming thread hasn't closed (suspended process)} -setup { #<<<
+	lo_ka_server instvar s
+	set url	http://127.0.0.1:[$s port]
+} -body {
+	for {set i 0} {$i < 10} {incr i} {
+		rl_http instvar h GET $url
+		$h code
+	}
+	# Simulate resuming from suspension: the parked connection's idle timeout
+	# has long passed, but the grooming thread hasn't had a chance to run
+	tsv::lock rl_http_keepalive_chans {
+		foreach key [tsv::array names rl_http_keepalive_chans] {
+			tsv::set rl_http_keepalive_chans $key [lmap chaninfo [tsv::get rl_http_keepalive_chans $key] {
+				lset chaninfo 1 0
+			}]
+		}
+	}
+	for {set i 0} {$i < 10} {incr i} {
+		rl_http instvar h GET $url
+		$h code
+	}
+	$s conuse
+} -cleanup {
+	unset -nocomplain i h s url key
+} -result {1 10 2 10}
+#>>>
+
 test keepalive_check-1.1 {Don't reuse connections after 500 response} -setup { #<<<
 	lo_ka_server instvar s -response_code_i {i {expr {$i == 50 ? 500 : 200}}}
 	set url	http://127.0.0.1:[$s port]

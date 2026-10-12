@@ -1,5 +1,5 @@
 project('rl_http',
-  version:            '1.26',
+  version:            '1.26.1',
   meson_version:      '>=1.3.0',
 )
 # Pure-Tcl module: rl_http is a single .tcl file distributed as a Tcl

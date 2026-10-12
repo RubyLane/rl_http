@@ -522,13 +522,24 @@ oo::class create rl_http::async_io { #<<<
 			#::rl_http::log debug "[self] reusing $chan for $scheme://$host:$port"
 			try {
 				thread::attach $chan
-				set age	[expr {[clock microseconds]/1e6 - $first_use}]
+				set now	[expr {[clock microseconds]/1e6}]
+				set age	[expr {$now - $first_use}]
 				if {
 					[set max_age [dict get $settings max_keepalive_age]] >= 0 &&
 					$age > $max_age
 				} {
 					#::rl_http::log notice "parked chan too old: $chan for $key (remain: [tsv::get rl_http_keepalive_chans $key])"
 					::rl_http::log notice "parked chan too old: $chan for $key"
+					chan close $chan
+					continue
+				} elseif {$now > $expiry} {
+					# The grooming thread normally closes parked chans past their expiry, but
+					# it doesn't run while the process is suspended (a frozen Lambda execution
+					# environment), so after resuming we can pop one that has been idle far
+					# longer than the keepalive timeout.  The remote may be closing it right
+					# now, racing our request (which then fails with READ_HEADERS dropped), and
+					# the eof check below can't see a FIN that hasn't arrived yet
+					::rl_http::log notice "parked chan expired: $chan for $key"
 					chan close $chan
 					continue
 				} else {
