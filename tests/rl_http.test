@@ -14,20 +14,24 @@ gc_class create uds_server {
 		tid
 	}
 
-	constructor testname { #<<<
+	constructor {testname {content_type text/plain} {body ok}} { #<<<
+		# Serves $body, octets, as $content_type
 		package require thread
 		if {[self next] ne ""} next
 
 		set tid	[thread::create -preserved]
 		thread::send $tid [string map [list \
-			%testname%	[list $testname] \
+			%testname%		[list $testname] \
+			%content_type%	[list $content_type] \
+			%body%			[list $body] \
 		] {
 			package require unix_sockets
 			set sockname	/tmp/rl_http_%testname%-[pid].sock
 			set listen	[unix_sockets::listen $sockname [list apply {{sock args} {
 				chan configure $sock -blocking 0 -translation {auto lf} -encoding iso8859-1
 				read $sock
-				puts -nonewline $sock "HTTP/1.1 200 Ok\nContent-Length: 2\nContent-Type: text/plain\nServer: Test\nDate: [clock format [clock seconds] -format "%a, %d %b %Y %T GMT" -timezone :UTC]\n\nok"
+				set body	%body%
+				puts -nonewline $sock "HTTP/1.1 200 Ok\nContent-Length: [string length $body]\nContent-Type: %content_type%\nServer: Test\nDate: [clock format [clock seconds] -format "%a, %d %b %Y %T GMT" -timezone :UTC]\n\n$body"
 				close $sock
 			}}]]
 
@@ -118,7 +122,39 @@ test rl_http-3.2 {local sockets, ip_future version scope, reuri} -setup { #<<<
 } -result {200 ok}
 #>>>
 
-::tcltest::cleanupTests
+::tcltest::test rl_http-4.1 {A JSON body is decoded from UTF-8 without a charset: application/json, and the AWS JSON protocols' application/x-amz-json-1.0 and 1.1} -setup { #<<<
+	if {[info exists ::rl_http::have_reuri]} {set old_have_reuri $::rl_http::have_reuri} else {unset -nocomplain old_have_reuri}
+	set ::rl_http::have_reuri 0
+	set servers	{}
+	foreach type {application/json application/x-amz-json-1.0 application/x-amz-json-1.1} {
+		lappend servers [uds_server new rl_http-4.1-[string map {/ _ . _} $type] $type [encoding convertto utf-8 "{\"title\":\"Caf\u00e9 10\u2033 doll\"}"]]
+	}
+} -body {
+	lmap s $servers {
+		rl_http instvar h GET "http://\[[$s sockname]\]/"
+		string equal [$h body] "{\"title\":\"Caf\u00e9 10\u2033 doll\"}"
+	}
+} -cleanup {
+	foreach s $servers {$s destroy}
+	unset -nocomplain servers s h
+	if {[info exists old_have_reuri]} {set ::rl_http::have_reuri $old_have_reuri; unset old_have_reuri} else {unset -nocomplain ::rl_http::have_reuri}
+} -result {1 1 1}
+#>>>
+test rl_http-4.2 {A body of another type without a charset is left as its octets} -setup { #<<<
+	if {[info exists ::rl_http::have_reuri]} {set old_have_reuri $::rl_http::have_reuri} else {unset -nocomplain old_have_reuri}
+	set ::rl_http::have_reuri 0
+	set octets	[encoding convertto utf-8 "Caf\u00e9"]
+	uds_server instvar s rl_http-4.2 application/octet-stream $octets
+} -body {
+	rl_http instvar h GET "http://\[[$s sockname]\]/"
+	string equal [$h body] $octets
+} -cleanup {
+	unset -nocomplain octets
+	if {[info exists old_have_reuri]} {set ::rl_http::have_reuri $old_have_reuri; unset old_have_reuri} else {unset -nocomplain ::rl_http::have_reuri}
+} -result 1
+#>>>
+
+cleanupTests
 return
 
 # vim: ft=tcl foldmethod=marker foldmarker=<<<,>>> ts=4 shiftwidth=4

@@ -1108,10 +1108,13 @@ oo::class create rl_http::async_io { #<<<
 			set content_type	[lindex [dict get $response headers content-type] end]
 			if {[regexp -nocase {^((?:text|application)/[^ ]+)(?:\scharset=\"?([^\"]+)\"?)?$} $content_type - mimetype charset]} {
 				if {$charset eq ""} {
-					# Some mimetypes have default charsets
-					switch -- $mimetype {
+					# Some mimetypes have default charsets.  JSON is always UTF-8 (RFC 8259), the
+					# AWS JSON protocols' application/x-amz-json-1.0 and 1.1 (DynamoDB, CloudWatch
+					# Logs, SQS, Secrets Manager ...) included
+					switch -glob -- $mimetype {
 						application/json -
-						text/json {
+						text/json -
+						application/x-amz-json-* {
 							set charset		utf-8
 						}
 
